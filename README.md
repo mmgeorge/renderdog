@@ -126,10 +126,11 @@ If it needs attention, suggested fixes typically include:
 
 You can also point to a specific header via `RENDERDOG_SYS_HEADER=/path/to/renderdoc_app.h`.
 
-## Author
+Alternatively, use the helper script (maintainers):
 
-Maintained by `Latias94`.
+- Update pregenerated bindings: `python scripts/regen_bindings.py`
+- Check without writing: `python scripts/regen_bindings.py --check`
 
 ## License
 
-MIT. See `LICENSE-MIT`.
+Dual-licensed under `MIT OR Apache-2.0`. See `LICENSE-MIT` and `LICENSE-APACHE`.

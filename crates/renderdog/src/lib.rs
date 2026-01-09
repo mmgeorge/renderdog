@@ -1,3 +1,13 @@
+//! RenderDoc in-application API wrapper.
+//!
+//! This crate provides a Rust wrapper around RenderDoc's *in-app capture API* (`renderdoc_app.h`).
+//! It supports:
+//! - connecting to an injected RenderDoc (Windows),
+//! - dynamically loading the RenderDoc library (Windows/Linux),
+//! - runtime API version negotiation (tries 1.6.0 down to 1.0.0).
+//!
+//! For automation workflows (renderdoccmd/qrenderdoc), see the `renderdog-automation` crate.
+
 mod in_app;
 mod renderdog;
 mod settings;

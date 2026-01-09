@@ -23,13 +23,16 @@ jobs:
         run: cargo fmt --check
       - name: cargo test
         run: cargo test --workspace
-      - name: cargo package (no-verify)
+      - name: cargo package (leaf crates, no-verify)
         run: |
-          cargo package -p renderdog --no-verify
           cargo package -p renderdog-sys --no-verify
           cargo package -p renderdog-automation --no-verify
-          cargo package -p renderdog-winit --no-verify
-          cargo package -p renderdog-mcp --no-verify
+        # Note:
+        # - `renderdog` depends on `renderdog-sys` (path dependency).
+        # - `renderdog-winit` depends on `renderdog`.
+        # - `renderdog-mcp` depends on `renderdog-automation`.
+        # `cargo package` resolves path deps to crates.io versions, so packaging these crates
+        # is expected to fail until their dependencies are published in order.
 
   artifacts:
     name: Build artifacts (${{ matrix.os }})
