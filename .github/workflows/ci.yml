@@ -22,9 +22,9 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: cargo fmt
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Test (${{ matrix.os }})
@@ -36,9 +36,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
-      - name: cargo test
-        run: cargo test --workspace
+      - name: cargo nextest
+        run: cargo nextest run --workspace
+      - name: cargo test (doc)
+        run: cargo test --workspace --doc
 
   check-macos:
     name: Check (macOS, best-effort)

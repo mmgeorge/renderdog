@@ -3,69 +3,245 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
-  workflow_dispatch:
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
-permissions:
-  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
-  verify:
-    name: Verify (fmt + tests + package)
+  validate:
+    name: Validate tag/version
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo fmt
-        run: cargo fmt --check
-      - name: cargo test
-        run: cargo test --workspace
-      - name: cargo package (leaf crates, no-verify)
-        run: |
-          cargo package -p renderdog-sys --no-verify
-          cargo package -p renderdog-automation --no-verify
-        # Note:
-        # - `renderdog` depends on `renderdog-sys` (path dependency).
-        # - `renderdog-winit` depends on `renderdog`.
-        # - `renderdog-mcp` depends on `renderdog-automation`.
-        # `cargo package` resolves path deps to crates.io versions, so packaging these crates
-        # is expected to fail until their dependencies are published in order.
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  artifacts:
-    name: Build artifacts (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    needs: verify
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            bin: renderdog-mcp
-            archive: renderdog-mcp-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            bin: renderdog-mcp.exe
-            archive: renderdog-mcp-${{ github.ref_name }}-x86_64-pc-windows-msvc.zip
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure workspace/crate versions match tag
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          
+          version = os.environ["GITHUB_REF_NAME"].removeprefix("v")
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              raise SystemExit(f"Invalid tag version: {version}")
+          
+          def load_toml(path: str) -> dict:
+              with open(path, "rb") as f:
+                  return tomllib.load(f)
+          
+          root = load_toml("Cargo.toml")
+          ws_version = root["workspace"]["package"]["version"]
+          if ws_version != version:
+              raise SystemExit(
+                  f"Tag v{version} does not match workspace.package.version={ws_version}"
+              )
+          
+          crates = [
+              ("renderdog-sys", "crates/renderdog-sys/Cargo.toml"),
+              ("renderdog", "crates/renderdog/Cargo.toml"),
+              ("renderdog-automation", "crates/renderdog-automation/Cargo.toml"),
+              ("renderdog-winit", "crates/renderdog-winit/Cargo.toml"),
+              ("renderdog-mcp", "crates/renderdog-mcp/Cargo.toml"),
+          ]
+          internal = {name for name, _ in crates}
+          
+          def iter_dep_tables(manifest: dict):
+              for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                  table = manifest.get(key)
+                  if isinstance(table, dict):
+                      yield table
+          
+              target = manifest.get("target")
+              if not isinstance(target, dict):
+                  return
+              for _, cfg in target.items():
+                  if not isinstance(cfg, dict):
+                      continue
+                  for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+                      table = cfg.get(key)
+                      if isinstance(table, dict):
+                          yield table
+          
+          def normalize_version(dep_value):
+              if isinstance(dep_value, str):
+                  return dep_value
+              if isinstance(dep_value, dict):
+                  v = dep_value.get("version")
+                  if isinstance(v, str):
+                      return v
+              return None
+          
+          bad_versions = {}
+          bad_internal_deps = {}
+          
+          for crate_name, manifest_path in crates:
+              manifest = load_toml(manifest_path)
+              pkg = manifest.get("package", {})
+              if pkg.get("name") != crate_name:
+                  raise SystemExit(
+                      f"{manifest_path}: package.name={pkg.get('name')} (expected {crate_name})"
+                  )
+          
+              pkg_version = pkg.get("version")
+              if isinstance(pkg_version, str):
+                  if pkg_version != version:
+                      bad_versions[crate_name] = pkg_version
+              elif isinstance(pkg_version, dict):
+                  if pkg_version.get("workspace") is not True:
+                      bad_versions[crate_name] = pkg_version
+              else:
+                  bad_versions[crate_name] = pkg_version
+          
+              for deps in iter_dep_tables(manifest):
+                  for dep_name, dep_value in deps.items():
+                      if dep_name not in internal:
+                          continue
+                      dep_version = normalize_version(dep_value)
+                      if dep_version is None:
+                          bad_internal_deps.setdefault(crate_name, {})[dep_name] = dep_value
+                          continue
+                      if dep_version != version:
+                          bad_internal_deps.setdefault(crate_name, {})[dep_name] = dep_version
+          
+          if bad_versions:
+              raise SystemExit(f"Crate package versions do not match v{version}: {bad_versions}")
+          if bad_internal_deps:
+              raise SystemExit(
+                  f"Internal dependency versions do not match v{version}: {bad_internal_deps}"
+              )
+          
+          print(f"OK: v{version} matches workspace + crates")
+          PY
+
+  test:
+    name: Test before publish
+    runs-on: ubuntu-latest
+    needs: validate
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: cargo build
-        run: cargo build -p renderdog-mcp --release
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          tar -C target/release -czf "${{ matrix.archive }}" "${{ matrix.bin }}"
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Compress-Archive -Path "target/release/${{ matrix.bin }}" -DestinationPath "${{ matrix.archive }}"
-      - uses: actions/upload-artifact@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          name: ${{ matrix.archive }}
-          path: ${{ matrix.archive }}
+          components: rustfmt, clippy
+
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test (nextest)
+        run: cargo nextest run --workspace
+
+      - name: Test (doc)
+        run: cargo test --workspace --doc
+
+      - name: Cargo package (renderdog-sys)
+        run: cargo package -p renderdog-sys
+      # NOTE: We intentionally do not run `cargo package` for downstream crates here.
+      # For workspace crates, packaging simulates crates.io publishing and may require
+      # published dependencies in the crates.io index.
+
+  publish:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish renderdog-sys
+        run: cargo publish -p renderdog-sys --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+
+      - name: Publish renderdog
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if cargo publish -p renderdog --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"; then
+              exit 0
+            fi
+            echo "renderdog publish failed (attempt $i), waiting for crates.io index..."
+            sleep 30
+          done
+          exit 1
+
+      - name: Publish renderdog-automation
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if cargo publish -p renderdog-automation --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"; then
+              exit 0
+            fi
+            echo "renderdog-automation publish failed (attempt $i), waiting for crates.io index..."
+            sleep 30
+          done
+          exit 1
+
+      - name: Publish renderdog-winit
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if cargo publish -p renderdog-winit --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"; then
+              exit 0
+            fi
+            echo "renderdog-winit publish failed (attempt $i), waiting for crates.io index..."
+            sleep 30
+          done
+          exit 1
+
+      - name: Publish renderdog-mcp
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if cargo publish -p renderdog-mcp --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"; then
+              exit 0
+            fi
+            echo "renderdog-mcp publish failed (attempt $i), waiting for crates.io index..."
+            sleep 30
+          done
+          exit 1
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: publish
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract release notes
+        id: notes
+        uses: ffurrer2/extract-release-notes@v2
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.notes.outputs.release_notes }}
