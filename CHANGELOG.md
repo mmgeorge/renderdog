@@ -6,6 +6,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Added
+
+- Export a searchable bindings index (`*.bindings.jsonl`) via `qrenderdoc --python` for fast offline querying.
+
 ## [0.1.0] - 2026-01-09
 
 ### Added

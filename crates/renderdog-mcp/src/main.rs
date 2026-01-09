@@ -114,6 +114,60 @@ struct CaptureAndExportActionsRequest {
     case_sensitive: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CaptureAndExportBindingsIndexRequest {
+    executable: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    working_dir: Option<String>,
+    #[serde(default)]
+    artifacts_dir: Option<String>,
+    #[serde(default)]
+    capture_template_name: Option<String>,
+
+    #[serde(default = "default_host")]
+    host: String,
+    #[serde(default = "default_frames")]
+    num_frames: u32,
+    #[serde(default = "default_timeout_s")]
+    timeout_s: u32,
+
+    #[serde(default)]
+    output_dir: Option<String>,
+    #[serde(default)]
+    basename: Option<String>,
+    #[serde(default)]
+    marker_prefix: Option<String>,
+    #[serde(default)]
+    event_id_min: Option<u32>,
+    #[serde(default)]
+    event_id_max: Option<u32>,
+    #[serde(default)]
+    name_contains: Option<String>,
+    #[serde(default)]
+    marker_contains: Option<String>,
+    #[serde(default)]
+    case_sensitive: bool,
+    #[serde(default)]
+    include_cbuffers: bool,
+    #[serde(default)]
+    include_outputs: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct CaptureAndExportBindingsIndexResponse {
+    target_ident: u32,
+    capture_path: String,
+    capture_file_template: Option<String>,
+    stdout: String,
+    stderr: String,
+
+    bindings_jsonl_path: String,
+    summary_json_path: String,
+    total_drawcalls: u64,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 struct CaptureAndExportActionsResponse {
     target_ident: u32,
@@ -172,6 +226,31 @@ struct ExportActionsRequest {
     marker_contains: Option<String>,
     #[serde(default)]
     case_sensitive: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ExportBindingsIndexRequest {
+    capture_path: String,
+    #[serde(default)]
+    output_dir: Option<String>,
+    #[serde(default)]
+    basename: Option<String>,
+    #[serde(default)]
+    marker_prefix: Option<String>,
+    #[serde(default)]
+    event_id_min: Option<u32>,
+    #[serde(default)]
+    event_id_max: Option<u32>,
+    #[serde(default)]
+    name_contains: Option<String>,
+    #[serde(default)]
+    marker_contains: Option<String>,
+    #[serde(default)]
+    case_sensitive: bool,
+    #[serde(default)]
+    include_cbuffers: bool,
+    #[serde(default)]
+    include_outputs: bool,
 }
 
 #[derive(Clone)]
@@ -502,6 +581,80 @@ impl RenderdogMcpServer {
     }
 
     #[tool(
+        name = "renderdoc_export_bindings_index_jsonl",
+        description = "Export a capture (.rdc) into a searchable bindings index: <basename>.bindings.jsonl and <basename>.bindings_summary.json."
+    )]
+    async fn export_bindings_index_jsonl(
+        &self,
+        Parameters(req): Parameters<ExportBindingsIndexRequest>,
+    ) -> Result<Json<renderdog::ExportBindingsIndexResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_export_bindings_index_jsonl",
+            capture_path = %req.capture_path,
+            include_cbuffers = req.include_cbuffers,
+            include_outputs = req.include_outputs,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_export_bindings_index_jsonl", "failed");
+            tracing::debug!(tool = "renderdoc_export_bindings_index_jsonl", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let output_dir = req
+            .output_dir
+            .unwrap_or_else(|| renderdog::default_exports_dir(&cwd).display().to_string());
+
+        std::fs::create_dir_all(&output_dir)
+            .map_err(|e| format!("create output_dir failed: {e}"))?;
+
+        let basename = req.basename.unwrap_or_else(|| {
+            Path::new(&req.capture_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("capture")
+                .to_string()
+        });
+
+        let res = install
+            .export_bindings_index_jsonl(
+                &cwd,
+                &renderdog::ExportBindingsIndexRequest {
+                    capture_path: req.capture_path,
+                    output_dir,
+                    basename,
+                    marker_prefix: req.marker_prefix,
+                    event_id_min: req.event_id_min,
+                    event_id_max: req.event_id_max,
+                    name_contains: req.name_contains,
+                    marker_contains: req.marker_contains,
+                    case_sensitive: req.case_sensitive,
+                    include_cbuffers: req.include_cbuffers,
+                    include_outputs: req.include_outputs,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_export_bindings_index_jsonl", "failed");
+                tracing::debug!(tool = "renderdoc_export_bindings_index_jsonl", err = %e, "details");
+                format!("export bindings index failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_export_bindings_index_jsonl",
+            elapsed_ms = start.elapsed().as_millis(),
+            bindings_jsonl_path = %res.bindings_jsonl_path,
+            total_drawcalls = res.total_drawcalls,
+            "ok"
+        );
+
+        Ok(Json(res))
+    }
+
+    #[tool(
         name = "renderdoc_open_capture_ui",
         description = "Open a .rdc capture in qrenderdoc UI."
     )]
@@ -694,6 +847,163 @@ impl RenderdogMcpServer {
             summary_json_path: export_res.summary_json_path,
             total_actions: export_res.total_actions,
             drawcall_actions: export_res.drawcall_actions,
+        }))
+    }
+
+    #[tool(
+        name = "renderdoc_capture_and_export_bindings_index_jsonl",
+        description = "One-shot workflow: launch target under renderdoccmd capture, trigger capture via target control, then export <basename>.bindings.jsonl and <basename>.bindings_summary.json."
+    )]
+    async fn capture_and_export_bindings_index_jsonl(
+        &self,
+        Parameters(req): Parameters<CaptureAndExportBindingsIndexRequest>,
+    ) -> Result<Json<CaptureAndExportBindingsIndexResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+            executable = %req.executable,
+            args_len = req.args.len(),
+            include_cbuffers = req.include_cbuffers,
+            include_outputs = req.include_outputs,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(
+                tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                "failed"
+            );
+            tracing::debug!(
+                tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                err = %e,
+                "details"
+            );
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let artifacts_dir = req
+            .artifacts_dir
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| renderdog::default_artifacts_dir(&cwd));
+
+        std::fs::create_dir_all(&artifacts_dir)
+            .map_err(|e| format!("create artifacts_dir failed: {e}"))?;
+
+        let capture_file_template = req
+            .capture_template_name
+            .as_deref()
+            .map(|name| artifacts_dir.join(format!("{name}.rdc")));
+
+        let launch_req = renderdog::CaptureLaunchRequest {
+            executable: PathBuf::from(req.executable),
+            args: req.args.into_iter().map(OsString::from).collect(),
+            working_dir: req.working_dir.map(PathBuf::from),
+            capture_file_template: capture_file_template.clone(),
+        };
+
+        let launch_res = install.launch_capture(&launch_req).map_err(|e| {
+            tracing::error!(
+                tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                "failed"
+            );
+            tracing::debug!(
+                tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                err = %e,
+                "details"
+            );
+            format!("launch capture failed: {e}")
+        })?;
+
+        let capture_res = install
+            .trigger_capture_via_target_control(
+                &cwd,
+                &renderdog::TriggerCaptureRequest {
+                    host: req.host,
+                    target_ident: launch_res.target_ident,
+                    num_frames: req.num_frames,
+                    timeout_s: req.timeout_s,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(
+                    tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                    "failed"
+                );
+                tracing::debug!(
+                    tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                    err = %e,
+                    "details"
+                );
+                format!("trigger capture failed: {e}")
+            })?;
+
+        let output_dir = req
+            .output_dir
+            .unwrap_or_else(|| renderdog::default_exports_dir(&cwd).display().to_string());
+
+        std::fs::create_dir_all(&output_dir)
+            .map_err(|e| format!("create output_dir failed: {e}"))?;
+
+        let basename = req.basename.unwrap_or_else(|| {
+            Path::new(&capture_res.capture_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("capture")
+                .to_string()
+        });
+
+        let export_res = install
+            .export_bindings_index_jsonl(
+                &cwd,
+                &renderdog::ExportBindingsIndexRequest {
+                    capture_path: capture_res.capture_path.clone(),
+                    output_dir,
+                    basename,
+                    marker_prefix: req.marker_prefix,
+                    event_id_min: req.event_id_min,
+                    event_id_max: req.event_id_max,
+                    name_contains: req.name_contains,
+                    marker_contains: req.marker_contains,
+                    case_sensitive: req.case_sensitive,
+                    include_cbuffers: req.include_cbuffers,
+                    include_outputs: req.include_outputs,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(
+                    tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                    "failed"
+                );
+                tracing::debug!(
+                    tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+                    err = %e,
+                    "details"
+                );
+                format!("export bindings index failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_capture_and_export_bindings_index_jsonl",
+            elapsed_ms = start.elapsed().as_millis(),
+            target_ident = launch_res.target_ident,
+            capture_path = %export_res.capture_path,
+            bindings_jsonl_path = %export_res.bindings_jsonl_path,
+            total_drawcalls = export_res.total_drawcalls,
+            "ok"
+        );
+
+        Ok(Json(CaptureAndExportBindingsIndexResponse {
+            target_ident: launch_res.target_ident,
+            capture_path: export_res.capture_path,
+            capture_file_template: capture_file_template.map(|p| p.display().to_string()),
+            stdout: launch_res.stdout,
+            stderr: launch_res.stderr,
+            bindings_jsonl_path: export_res.bindings_jsonl_path,
+            summary_json_path: export_res.summary_json_path,
+            total_drawcalls: export_res.total_drawcalls,
         }))
     }
 }

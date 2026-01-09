@@ -81,7 +81,12 @@ Run the server locally (stdio transport):
 
 1) launch a target with `renderdoccmd capture`
 2) trigger capture via target-control
-3) export searchable artifacts (`.actions.jsonl` + `.summary.json`)
+3) export searchable artifacts
+
+Artifacts:
+
+- actions tree: `.actions.jsonl` + `.summary.json`
+- bindings index: `.bindings.jsonl` + `.bindings_summary.json` (shader names + resource bindings per drawcall)
 
 The export supports optional filters:
 
