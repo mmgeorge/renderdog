@@ -738,6 +738,23 @@ def pick_default_event_id(controller) -> int:
     actions = flatten_actions(controller.GetRootActions())
     if not actions:
         return 0
+    # Prefer the last drawcall-like event over e.g. Present, so outputs are meaningful.
+    drawcalls = []
+    for a in actions:
+        try:
+            if (
+                (a.flags & rd.ActionFlags.Drawcall)
+                or (a.flags & rd.ActionFlags.Dispatch)
+                or (a.flags & rd.ActionFlags.MeshDispatch)
+                or (a.flags & rd.ActionFlags.DispatchRay)
+            ):
+                drawcalls.append(a)
+        except Exception:
+            pass
+
+    if drawcalls:
+        return int(max(a.eventId for a in drawcalls))
+
     return int(max(a.eventId for a in actions))
 
 
