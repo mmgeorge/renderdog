@@ -64,6 +64,8 @@ pub struct FindEventsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FoundEvent {
     pub event_id: u32,
+    pub parent_event_id: Option<u32>,
+    pub depth: u32,
     pub name: String,
     pub flags: u64,
     pub flags_names: Vec<String>,
@@ -493,7 +495,9 @@ impl RenderDocInstallation {
     }
 }
 
-const TRIGGER_CAPTURE_PY: &str = r#"
+const TRIGGER_CAPTURE_PY: &str = include_str!("../scripts/trigger_capture.py");
+#[cfg(any())]
+const _TRIGGER_CAPTURE_PY_INLINE: &str = r#"
 import json
 import os
 import time
@@ -562,7 +566,9 @@ if __name__ == "__main__":
     raise SystemExit(0)
 "#;
 
-const FIND_EVENTS_JSON_PY: &str = r#"
+const FIND_EVENTS_JSON_PY: &str = include_str!("../scripts/find_events_json.py");
+#[cfg(any())]
+const _FIND_EVENTS_JSON_PY_INLINE: &str = r#"
 import json
 import traceback
 
@@ -801,7 +807,9 @@ if __name__ == "__main__":
     raise SystemExit(0)
 "#;
 
-const EXPORT_ACTIONS_JSONL_PY: &str = r#"
+const EXPORT_ACTIONS_JSONL_PY: &str = include_str!("../scripts/export_actions_jsonl.py");
+#[cfg(any())]
+const _EXPORT_ACTIONS_JSONL_PY_INLINE: &str = r#"
 import json
 import os
 import traceback
@@ -1036,7 +1044,10 @@ if __name__ == "__main__":
     raise SystemExit(0)
 "#;
 
-const EXPORT_BINDINGS_INDEX_JSONL_PY: &str = r#"
+const EXPORT_BINDINGS_INDEX_JSONL_PY: &str =
+    include_str!("../scripts/export_bindings_index_jsonl.py");
+#[cfg(any())]
+const _EXPORT_BINDINGS_INDEX_JSONL_PY_INLINE: &str = r#"
 import json
 import os
 import traceback

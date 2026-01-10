@@ -400,7 +400,9 @@ impl RenderDocInstallation {
     }
 }
 
-const REPLAY_LIST_TEXTURES_JSON_PY: &str = r#"
+const REPLAY_LIST_TEXTURES_JSON_PY: &str = include_str!("../scripts/replay_list_textures_json.py");
+#[cfg(any())]
+const _REPLAY_LIST_TEXTURES_JSON_PY_INLINE: &str = r#"
 import json
 import os
 import traceback
@@ -518,7 +520,9 @@ if __name__ == "__main__":
     raise SystemExit(0)
 "#;
 
-const REPLAY_PICK_PIXEL_JSON_PY: &str = r#"
+const REPLAY_PICK_PIXEL_JSON_PY: &str = include_str!("../scripts/replay_pick_pixel_json.py");
+#[cfg(any())]
+const _REPLAY_PICK_PIXEL_JSON_PY_INLINE: &str = r#"
 import json
 import os
 import traceback
@@ -615,7 +619,10 @@ if __name__ == "__main__":
     raise SystemExit(0)
 "#;
 
-const REPLAY_SAVE_TEXTURE_PNG_JSON_PY: &str = r#"
+const REPLAY_SAVE_TEXTURE_PNG_JSON_PY: &str =
+    include_str!("../scripts/replay_save_texture_png_json.py");
+#[cfg(any())]
+const _REPLAY_SAVE_TEXTURE_PNG_JSON_PY_INLINE: &str = r#"
 import json
 import os
 import traceback
@@ -709,7 +716,10 @@ if __name__ == "__main__":
     raise SystemExit(0)
 "#;
 
-const REPLAY_SAVE_OUTPUTS_PNG_JSON_PY: &str = r#"
+const REPLAY_SAVE_OUTPUTS_PNG_JSON_PY: &str =
+    include_str!("../scripts/replay_save_outputs_png_json.py");
+#[cfg(any())]
+const _REPLAY_SAVE_OUTPUTS_PNG_JSON_PY_INLINE: &str = r#"
 import json
 import os
 import traceback
