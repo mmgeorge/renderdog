@@ -22,9 +22,10 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - MCP export bundle tool: `renderdoc_export_bundle_jsonl` (actions + bindings index from an existing .rdc).
 - Bundle tools can optionally save a thumbnail and/or open the capture in qrenderdoc UI.
 - A practical RenderDoc playbook for validating clip-mask mapping: `docs/playbooks/fret-clip-mask.md`.
+- A short guide for adding stable GPU pass markers: `docs/guides/gpu-markers.md`.
 - A recommended adoption workflow section in the workspace README (capture -> markers -> UI inspection -> automation exports).
 - A README section describing integration patterns with and without MCP.
-- A README section documenting MCP client setup for Claude Code and Codex.
+- A README section documenting MCP client setup for Claude Code, Codex, and Gemini CLI.
 
 ### Fixed
 

@@ -71,6 +71,8 @@ RenderDoc analysis depends heavily on having stable pass markers/labels. Regardl
 workflow you choose below, make sure your renderer emits consistent GPU markers for each pass
 so you can search them in RenderDoc's Event Browser.
 
+See: `docs/guides/gpu-markers.md` and `docs/playbooks/fret-clip-mask.md`.
+
 ### Without MCP
 
 Use this when you want a local/manual workflow (or your own automation) without an MCP client.
@@ -96,7 +98,7 @@ Use this when you want an AI agent to drive capture/replay/export via tool calls
   - Export bundle from an existing `.rdc`: `renderdoc_export_bundle_jsonl`
 - Headless replay outputs: `renderdoc_replay_save_outputs_png`
 
-## MCP client setup (Claude Code / Codex)
+## MCP client setup (Claude Code / Codex / Gemini CLI)
 
 `renderdog-mcp` uses the stdio transport, so any MCP client that supports stdio servers can run it.
 You typically want to set `RENDERDOG_RENDERDOC_DIR` so the server can find `renderdoccmd` and `qrenderdoc`.
@@ -152,6 +154,30 @@ Notes:
 
 - Verify setup with `codex mcp list`.
 - If you run Codex in WSL but want to use a Windows RenderDoc install, ensure `renderdog-mcp` is launched as a Windows executable and that `RENDERDOG_RENDERDOC_DIR` points to the Windows install root.
+
+### Gemini CLI
+
+Gemini CLI can manage MCP servers either via commands or by editing `settings.json`.
+
+- Add a local stdio server via CLI:
+  - `gemini mcp add --transport stdio -e RENDERDOG_RENDERDOC_DIR=C:\Users\you\scoop\apps\renderdoc\current renderdog renderdog-mcp`
+- Verify:
+  - `gemini mcp list`
+- Configure via `settings.json` (user scope: `~/.gemini/settings.json`, project scope: `.gemini/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "renderdog": {
+      "command": "renderdog-mcp",
+      "args": [],
+      "env": {
+        "RENDERDOG_RENDERDOC_DIR": "C:\\\\Users\\\\you\\\\scoop\\\\apps\\\\renderdoc\\\\current"
+      }
+    }
+  }
+}
+```
 
 ## Examples
 
