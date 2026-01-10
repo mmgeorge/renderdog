@@ -229,6 +229,7 @@ Gemini CLI can manage MCP servers either via commands or by editing `settings.js
 - Automation one-shot capture + export: `cargo run -p renderdog-automation --example one_shot_capture_export -- <exe> [args...]`
 - Automation export bundle from capture: `cargo run -p renderdog-automation --example export_bundle_from_capture -- <capture.rdc> [out_dir] [basename]`
 - Automation save pipeline outputs to PNG: `cargo run -p renderdog-automation --example replay_save_outputs_png -- <capture.rdc> [event_id] [out_dir] [basename]`
+- Automation diagnose environment (RenderDoc paths + Vulkan layer): `cargo run -p renderdog-automation --example diagnose_environment`
 - Winit hotkey capture (F12): `cargo run -p renderdog-winit --example winit_hotkey_capture`
 
 ## MCP workflow (one-shot)
