@@ -220,6 +220,7 @@ impl RenderDocInApp {
     fn resolve_api(
         get_api: sys::pRENDERDOC_GetAPI,
     ) -> Result<(NonNull<sys::RENDERDOC_API_1_6_0>, sys::RENDERDOC_Version), InAppError> {
+        let get_api = get_api.ok_or(InAppError::MissingGetApi)?;
         let preferred = [
             sys::RENDERDOC_Version::eRENDERDOC_API_Version_1_6_0,
             sys::RENDERDOC_Version::eRENDERDOC_API_Version_1_5_0,
