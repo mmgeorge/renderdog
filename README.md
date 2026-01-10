@@ -99,7 +99,42 @@ Use this when you want an AI agent to drive capture/replay/export via tool calls
   - Export bundle from an existing `.rdc`: `renderdoc_export_bundle_jsonl`
   - Find event IDs by marker/name: `renderdoc_find_events`
   - One-shot find + save outputs: `renderdoc_find_events_and_save_outputs_png`
-- Headless replay outputs: `renderdoc_replay_save_outputs_png`
+  - Headless replay outputs: `renderdoc_replay_save_outputs_png`
+
+Minimal requests (JSON examples):
+
+```json
+{
+  "tool": "renderdoc_find_events",
+  "args": {
+    "cwd": ".",
+    "capture_path": "captures/fret_capture.rdc",
+    "only_drawcalls": true,
+    "marker_contains": "fret composite",
+    "max_results": 200
+  }
+}
+```
+
+Notes:
+
+- `max_results` defaults to `200` in `renderdog-mcp`. Set it to `null` to disable truncation.
+- Use `cwd` to control how relative paths (e.g. `capture_path`, `output_dir`, `output_path`) are resolved for this call.
+
+```json
+{
+  "tool": "renderdoc_find_events_and_save_outputs_png",
+  "args": {
+    "cwd": ".",
+    "capture_path": "captures/fret_capture.rdc",
+    "marker_contains": "fret composite",
+    "selection": "last",
+    "output_dir": "artifacts/renderdoc/exports/replay",
+    "basename": "fret_capture",
+    "include_depth": false
+  }
+}
+```
 
 ## MCP client setup (Claude Code / Codex / Gemini CLI)
 
