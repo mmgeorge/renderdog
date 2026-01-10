@@ -342,6 +342,35 @@ struct ExportBindingsIndexRequest {
     include_outputs: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ExportBundleRequest {
+    capture_path: String,
+    #[serde(default)]
+    output_dir: Option<String>,
+    #[serde(default)]
+    basename: Option<String>,
+
+    #[serde(default)]
+    only_drawcalls: bool,
+    #[serde(default)]
+    marker_prefix: Option<String>,
+    #[serde(default)]
+    event_id_min: Option<u32>,
+    #[serde(default)]
+    event_id_max: Option<u32>,
+    #[serde(default)]
+    name_contains: Option<String>,
+    #[serde(default)]
+    marker_contains: Option<String>,
+    #[serde(default)]
+    case_sensitive: bool,
+
+    #[serde(default)]
+    include_cbuffers: bool,
+    #[serde(default)]
+    include_outputs: bool,
+}
+
 #[derive(Clone)]
 struct RenderdogMcpServer {
     tool_router: ToolRouter<Self>,
@@ -736,6 +765,84 @@ impl RenderdogMcpServer {
             tool = "renderdoc_export_bindings_index_jsonl",
             elapsed_ms = start.elapsed().as_millis(),
             bindings_jsonl_path = %res.bindings_jsonl_path,
+            total_drawcalls = res.total_drawcalls,
+            "ok"
+        );
+
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_export_bundle_jsonl",
+        description = "Export a capture (.rdc) into searchable artifacts: <basename>.actions.jsonl (+ summary) and <basename>.bindings.jsonl (+ bindings_summary)."
+    )]
+    async fn export_bundle_jsonl(
+        &self,
+        Parameters(req): Parameters<ExportBundleRequest>,
+    ) -> Result<Json<renderdog::ExportBundleResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_export_bundle_jsonl",
+            capture_path = %req.capture_path,
+            only_drawcalls = req.only_drawcalls,
+            include_cbuffers = req.include_cbuffers,
+            include_outputs = req.include_outputs,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_export_bundle_jsonl", "failed");
+            tracing::debug!(tool = "renderdoc_export_bundle_jsonl", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let output_dir = req
+            .output_dir
+            .unwrap_or_else(|| renderdog::default_exports_dir(&cwd).display().to_string());
+
+        std::fs::create_dir_all(&output_dir)
+            .map_err(|e| format!("create output_dir failed: {e}"))?;
+
+        let basename = req.basename.unwrap_or_else(|| {
+            Path::new(&req.capture_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("capture")
+                .to_string()
+        });
+
+        let res = install
+            .export_bundle_jsonl(
+                &cwd,
+                &renderdog::ExportBundleRequest {
+                    capture_path: req.capture_path,
+                    output_dir,
+                    basename,
+                    only_drawcalls: req.only_drawcalls,
+                    marker_prefix: req.marker_prefix,
+                    event_id_min: req.event_id_min,
+                    event_id_max: req.event_id_max,
+                    name_contains: req.name_contains,
+                    marker_contains: req.marker_contains,
+                    case_sensitive: req.case_sensitive,
+                    include_cbuffers: req.include_cbuffers,
+                    include_outputs: req.include_outputs,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_export_bundle_jsonl", "failed");
+                tracing::debug!(tool = "renderdoc_export_bundle_jsonl", err = %e, "details");
+                format!("export bundle failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_export_bundle_jsonl",
+            elapsed_ms = start.elapsed().as_millis(),
+            actions_jsonl_path = %res.actions_jsonl_path,
+            bindings_jsonl_path = %res.bindings_jsonl_path,
+            total_actions = res.total_actions,
             total_drawcalls = res.total_drawcalls,
             "ok"
         );

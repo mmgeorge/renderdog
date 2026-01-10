@@ -70,6 +70,7 @@ Key points:
 - In-app connect (injected-only, Windows): `cargo run -p renderdog --example in_app_injected_only`
 - In-app options/overlay/output template: `cargo run -p renderdog --example in_app_options_overlay`
 - Automation one-shot capture + export: `cargo run -p renderdog-automation --example one_shot_capture_export -- <exe> [args...]`
+- Automation export bundle from capture: `cargo run -p renderdog-automation --example export_bundle_from_capture -- <capture.rdc> [out_dir] [basename]`
 - Winit hotkey capture (F12): `cargo run -p renderdog-winit --example winit_hotkey_capture`
 
 ## MCP workflow (one-shot)
@@ -86,6 +87,7 @@ Run the server locally (stdio transport):
 3) export searchable artifacts
 
 Recommended: `renderdoc_capture_and_export_bundle_jsonl` (exports both actions + bindings index).
+For an existing capture, use: `renderdoc_export_bundle_jsonl`.
 
 Artifacts:
 
