@@ -76,6 +76,32 @@ struct OpenCaptureUiResponse {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct ReplayListTexturesRequest {
+    capture_path: String,
+    #[serde(default)]
+    event_id: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ReplayPickPixelRequest {
+    capture_path: String,
+    #[serde(default)]
+    event_id: Option<u32>,
+    texture_index: u32,
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ReplaySaveTexturePngRequest {
+    capture_path: String,
+    #[serde(default)]
+    event_id: Option<u32>,
+    texture_index: u32,
+    output_path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct CaptureAndExportActionsRequest {
     executable: String,
     #[serde(default)]
@@ -694,6 +720,161 @@ impl RenderdogMcpServer {
             capture_path: req.capture_path,
             pid,
         }))
+    }
+
+    #[tool(
+        name = "renderdoc_replay_list_textures",
+        description = "List textures in a .rdc capture via `qrenderdoc --python` replay (headless)."
+    )]
+    async fn replay_list_textures(
+        &self,
+        Parameters(req): Parameters<ReplayListTexturesRequest>,
+    ) -> Result<Json<renderdog::ReplayListTexturesResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_replay_list_textures",
+            capture_path = %req.capture_path,
+            event_id = req.event_id,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_replay_list_textures", "failed");
+            tracing::debug!(tool = "renderdoc_replay_list_textures", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let res = install
+            .replay_list_textures(
+                &cwd,
+                &renderdog::ReplayListTexturesRequest {
+                    capture_path: req.capture_path,
+                    event_id: req.event_id,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_replay_list_textures", "failed");
+                tracing::debug!(tool = "renderdoc_replay_list_textures", err = %e, "details");
+                format!("replay list textures failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_replay_list_textures",
+            elapsed_ms = start.elapsed().as_millis(),
+            textures = res.textures.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_replay_pick_pixel",
+        description = "Pick a pixel from a texture in a .rdc capture via `qrenderdoc --python` replay."
+    )]
+    async fn replay_pick_pixel(
+        &self,
+        Parameters(req): Parameters<ReplayPickPixelRequest>,
+    ) -> Result<Json<renderdog::ReplayPickPixelResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_replay_pick_pixel",
+            capture_path = %req.capture_path,
+            event_id = req.event_id,
+            texture_index = req.texture_index,
+            x = req.x,
+            y = req.y,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_replay_pick_pixel", "failed");
+            tracing::debug!(tool = "renderdoc_replay_pick_pixel", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let res = install
+            .replay_pick_pixel(
+                &cwd,
+                &renderdog::ReplayPickPixelRequest {
+                    capture_path: req.capture_path,
+                    event_id: req.event_id,
+                    texture_index: req.texture_index,
+                    x: req.x,
+                    y: req.y,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_replay_pick_pixel", "failed");
+                tracing::debug!(tool = "renderdoc_replay_pick_pixel", err = %e, "details");
+                format!("replay pick pixel failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_replay_pick_pixel",
+            elapsed_ms = start.elapsed().as_millis(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_replay_save_texture_png",
+        description = "Save a texture to PNG from a .rdc capture via `qrenderdoc --python` replay."
+    )]
+    async fn replay_save_texture_png(
+        &self,
+        Parameters(req): Parameters<ReplaySaveTexturePngRequest>,
+    ) -> Result<Json<renderdog::ReplaySaveTexturePngResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_replay_save_texture_png",
+            capture_path = %req.capture_path,
+            event_id = req.event_id,
+            texture_index = req.texture_index,
+            output_path = %req.output_path,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_replay_save_texture_png", "failed");
+            tracing::debug!(
+                tool = "renderdoc_replay_save_texture_png",
+                err = %e,
+                "details"
+            );
+            format!("detect installation failed: {e}")
+        })?;
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let res = install
+            .replay_save_texture_png(
+                &cwd,
+                &renderdog::ReplaySaveTexturePngRequest {
+                    capture_path: req.capture_path,
+                    event_id: req.event_id,
+                    texture_index: req.texture_index,
+                    output_path: req.output_path,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_replay_save_texture_png", "failed");
+                tracing::debug!(
+                    tool = "renderdoc_replay_save_texture_png",
+                    err = %e,
+                    "details"
+                );
+                format!("replay save texture failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_replay_save_texture_png",
+            elapsed_ms = start.elapsed().as_millis(),
+            output_path = %res.output_path,
+            "ok"
+        );
+        Ok(Json(res))
     }
 
     #[tool(
