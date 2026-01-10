@@ -88,6 +88,7 @@ Run the server locally (stdio transport):
 
 Recommended: `renderdoc_capture_and_export_bundle_jsonl` (exports both actions + bindings index).
 For an existing capture, use: `renderdoc_export_bundle_jsonl`.
+Bundle tools also support optional `save_thumbnail` / `open_capture_ui` helpers.
 
 Artifacts:
 
@@ -130,6 +131,7 @@ checks:
 - List textures in a capture
 - Pick a pixel from a texture
 - Save a texture to PNG
+- Save current pipeline outputs (RTs + optional depth) to PNG
 
 These are exposed as:
 
@@ -137,10 +139,12 @@ These are exposed as:
   - `replay_list_textures`
   - `replay_pick_pixel`
   - `replay_save_texture_png`
+  - `replay_save_outputs_png`
 - `renderdog-mcp` tools:
   - `renderdoc_replay_list_textures`
   - `renderdoc_replay_pick_pixel`
   - `renderdoc_replay_save_texture_png`
+  - `renderdoc_replay_save_outputs_png`
 
 ## Logging
 

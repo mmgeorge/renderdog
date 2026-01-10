@@ -14,9 +14,13 @@ pub struct RenderDocInstallation {
 
 #[derive(Debug, Error)]
 pub enum DetectInstallationError {
-    #[error("renderdoc installation not found; set RENDERDOG_RENDERDOC_DIR or install RenderDoc")]
+    #[error(
+        "renderdoc installation not found; set RENDERDOG_RENDERDOC_DIR to the RenderDoc install root (contains qrenderdoc + renderdoccmd), or add them to PATH"
+    )]
     NotFound,
-    #[error("renderdoc installation at {0} is missing {1}")]
+    #[error(
+        "renderdoc installation at {0} is missing {1}; set RENDERDOG_RENDERDOC_DIR to the RenderDoc install root (contains qrenderdoc + renderdoccmd)"
+    )]
     MissingComponent(PathBuf, &'static str),
 }
 

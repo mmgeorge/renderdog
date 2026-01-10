@@ -71,6 +71,30 @@ pub struct ReplaySaveTexturePngResponse {
     pub output_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReplaySaveOutputsPngRequest {
+    pub capture_path: String,
+    pub event_id: Option<u32>,
+    pub output_dir: String,
+    pub basename: String,
+    pub include_depth: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReplaySavedImage {
+    pub kind: String,
+    pub index: Option<u32>,
+    pub resource_id: u64,
+    pub output_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ReplaySaveOutputsPngResponse {
+    pub capture_path: String,
+    pub event_id: u32,
+    pub outputs: Vec<ReplaySavedImage>,
+}
+
 #[derive(Debug, Error)]
 pub enum ReplayListTexturesError {
     #[error("failed to create scripts dir: {0}")]
@@ -138,6 +162,30 @@ pub enum ReplaySaveTexturePngError {
 }
 
 impl From<crate::QRenderDocPythonError> for ReplaySaveTexturePngError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ReplaySaveOutputsPngError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for ReplaySaveOutputsPngError {
     fn from(value: crate::QRenderDocPythonError) -> Self {
         Self::QRenderDocPython(Box::new(value))
     }
@@ -278,6 +326,51 @@ impl RenderDocInstallation {
                 .ok_or_else(|| ReplaySaveTexturePngError::ScriptError("missing result".into()))
         } else {
             Err(ReplaySaveTexturePngError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
+    pub fn replay_save_outputs_png(
+        &self,
+        cwd: &Path,
+        req: &ReplaySaveOutputsPngRequest,
+    ) -> Result<ReplaySaveOutputsPngResponse, ReplaySaveOutputsPngError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir)
+            .map_err(ReplaySaveOutputsPngError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("replay_save_outputs_png_json.py");
+        write_script_file(&script_path, REPLAY_SAVE_OUTPUTS_PNG_JSON_PY)
+            .map_err(ReplaySaveOutputsPngError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "replay_save_outputs_png")
+            .map_err(ReplaySaveOutputsPngError::CreateScriptsDir)?;
+        let request_path = run_dir.join("replay_save_outputs_png_json.request.json");
+        let response_path = run_dir.join("replay_save_outputs_png_json.response.json");
+        remove_if_exists(&response_path).map_err(ReplaySaveOutputsPngError::WriteRequest)?;
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(req).map_err(ReplaySaveOutputsPngError::ParseJson)?,
+        )
+        .map_err(ReplaySaveOutputsPngError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+
+        let _ = result;
+        let bytes =
+            std::fs::read(&response_path).map_err(ReplaySaveOutputsPngError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<ReplaySaveOutputsPngResponse> =
+            serde_json::from_slice(&bytes).map_err(ReplaySaveOutputsPngError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| ReplaySaveOutputsPngError::ScriptError("missing result".into()))
+        } else {
+            Err(ReplaySaveOutputsPngError::ScriptError(
                 env.error.unwrap_or_else(|| "unknown error".into()),
             ))
         }
@@ -566,6 +659,189 @@ def main() -> None:
                     "event_id": event_id,
                     "texture_index": int(req["texture_index"]),
                     "output_path": str(req["output_path"]),
+                }
+            )
+        finally:
+            try:
+                controller.Shutdown()
+            except Exception:
+                pass
+    finally:
+        try:
+            cap.Shutdown()
+        except Exception:
+            pass
+        rd.ShutdownReplay()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        write_response({"ok": False, "error": traceback.format_exc()})
+    else:
+        with open(RESP_PATH, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        write_response({"ok": True, "result": payload})
+    raise SystemExit(0)
+"#;
+
+const REPLAY_SAVE_OUTPUTS_PNG_JSON_PY: &str = r#"
+import json
+import os
+import traceback
+
+import renderdoc as rd
+
+
+REQ_PATH = "replay_save_outputs_png_json.request.json"
+RESP_PATH = "replay_save_outputs_png_json.response.json"
+
+
+def write_response(obj) -> None:
+    with open(RESP_PATH, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False)
+
+
+def flatten_actions(actions):
+    out = []
+    for a in actions:
+        out.append(a)
+        out.extend(flatten_actions(a.children))
+    return out
+
+
+def pick_default_event_id(controller) -> int:
+    actions = flatten_actions(controller.GetRootActions())
+    if not actions:
+        return 0
+    return int(max(a.eventId for a in actions))
+
+
+def bound_resource_id(br) -> int:
+    rid = getattr(br, "resourceId", None)
+    if rid is None:
+        return 0
+    try:
+        return int(rid)
+    except Exception:
+        try:
+            return int(rid.value)
+        except Exception:
+            return 0
+
+
+def set_save_params_from_bound_resource(save, br):
+    if hasattr(br, "firstMip"):
+        try:
+            save.mip = int(br.firstMip)
+        except Exception:
+            pass
+
+    if hasattr(br, "firstSlice"):
+        try:
+            save.slice = int(br.firstSlice)
+        except Exception:
+            pass
+
+    if hasattr(save, "sampleIdx"):
+        try:
+            save.sampleIdx = 0
+        except Exception:
+            pass
+
+
+def main() -> None:
+    with open(REQ_PATH, "r", encoding="utf-8") as f:
+        req = json.load(f)
+
+    os.makedirs(req["output_dir"], exist_ok=True)
+
+    rd.InitialiseReplay(rd.GlobalEnvironment(), [])
+
+    cap = rd.OpenCaptureFile()
+    try:
+        result = cap.OpenFile(req["capture_path"], "", None)
+        if result != rd.ResultCode.Succeeded:
+            raise RuntimeError("Couldn't open file: " + str(result))
+
+        if not cap.LocalReplaySupport():
+            raise RuntimeError("Capture cannot be replayed")
+
+        result, controller = cap.OpenCapture(rd.ReplayOptions(), None)
+        if result != rd.ResultCode.Succeeded:
+            raise RuntimeError("Couldn't initialise replay: " + str(result))
+
+        try:
+            event_id = req.get("event_id", None)
+            if event_id is None:
+                event_id = pick_default_event_id(controller)
+
+            controller.SetFrameEvent(int(event_id), True)
+
+            pipe = controller.GetPipelineState()
+            outputs = []
+
+            for i, br in enumerate(pipe.GetOutputTargets()):
+                rid = bound_resource_id(br)
+                if rid == 0:
+                    continue
+
+                out_path = os.path.join(
+                    req["output_dir"], f"{req['basename']}.event{int(event_id)}.rt{i}.png"
+                )
+
+                save = rd.TextureSave()
+                save.resourceId = br.resourceId
+                save.destType = rd.FileType.PNG
+                save.mip = 0
+                set_save_params_from_bound_resource(save, br)
+
+                result = controller.SaveTexture(save, out_path)
+                if result != rd.ResultCode.Succeeded:
+                    raise RuntimeError("SaveTexture failed: " + str(result))
+
+                outputs.append(
+                    {
+                        "kind": "color",
+                        "index": int(i),
+                        "resource_id": int(br.resourceId),
+                        "output_path": out_path,
+                    }
+                )
+
+            if bool(req.get("include_depth", False)):
+                br = pipe.GetDepthTarget()
+                rid = bound_resource_id(br)
+                if rid != 0:
+                    out_path = os.path.join(
+                        req["output_dir"], f"{req['basename']}.event{int(event_id)}.depth.png"
+                    )
+
+                    save = rd.TextureSave()
+                    save.resourceId = br.resourceId
+                    save.destType = rd.FileType.PNG
+                    save.mip = 0
+                    set_save_params_from_bound_resource(save, br)
+
+                    result = controller.SaveTexture(save, out_path)
+                    if result != rd.ResultCode.Succeeded:
+                        raise RuntimeError("SaveTexture(depth) failed: " + str(result))
+
+                    outputs.append(
+                        {
+                            "kind": "depth",
+                            "index": None,
+                            "resource_id": int(br.resourceId),
+                            "output_path": out_path,
+                        }
+                    )
+
+            write_response(
+                {
+                    "capture_path": req["capture_path"],
+                    "event_id": int(event_id),
+                    "outputs": outputs,
                 }
             )
         finally:

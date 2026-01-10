@@ -7,6 +7,7 @@ Repository: https://github.com/Latias94/renderdog
 See the [workspace README](../../README.md) for setup and available tools.
 
 Recommended entrypoint tool: `renderdoc_capture_and_export_bundle_jsonl`.
+For an existing capture, use: `renderdoc_export_bundle_jsonl`.
 
 Playbooks (practical debugging checklists):
 

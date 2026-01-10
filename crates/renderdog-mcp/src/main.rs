@@ -102,6 +102,19 @@ struct ReplaySaveTexturePngRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct ReplaySaveOutputsPngRequest {
+    capture_path: String,
+    #[serde(default)]
+    event_id: Option<u32>,
+    #[serde(default)]
+    output_dir: Option<String>,
+    #[serde(default)]
+    basename: Option<String>,
+    #[serde(default)]
+    include_depth: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct CaptureAndExportActionsRequest {
     executable: String,
     #[serde(default)]
@@ -237,6 +250,13 @@ struct CaptureAndExportBundleRequest {
     include_cbuffers: bool,
     #[serde(default)]
     include_outputs: bool,
+
+    #[serde(default)]
+    save_thumbnail: bool,
+    #[serde(default)]
+    thumbnail_output_path: Option<String>,
+    #[serde(default)]
+    open_capture_ui: bool,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -255,6 +275,11 @@ struct CaptureAndExportBundleResponse {
     bindings_jsonl_path: String,
     bindings_summary_json_path: String,
     total_drawcalls: u64,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thumbnail_output_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ui_pid: Option<u32>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -351,6 +376,13 @@ struct ExportBundleRequest {
     basename: Option<String>,
 
     #[serde(default)]
+    save_thumbnail: bool,
+    #[serde(default)]
+    thumbnail_output_path: Option<String>,
+    #[serde(default)]
+    open_capture_ui: bool,
+
+    #[serde(default)]
     only_drawcalls: bool,
     #[serde(default)]
     marker_prefix: Option<String>,
@@ -369,6 +401,15 @@ struct ExportBundleRequest {
     include_cbuffers: bool,
     #[serde(default)]
     include_outputs: bool,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+struct ExportBundleResponse {
+    bundle: renderdog::ExportBundleResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thumbnail_output_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ui_pid: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -779,7 +820,7 @@ impl RenderdogMcpServer {
     async fn export_bundle_jsonl(
         &self,
         Parameters(req): Parameters<ExportBundleRequest>,
-    ) -> Result<Json<renderdog::ExportBundleResponse>, String> {
+    ) -> Result<Json<ExportBundleResponse>, String> {
         let start = Instant::now();
         tracing::info!(
             tool = "renderdoc_export_bundle_jsonl",
@@ -787,6 +828,8 @@ impl RenderdogMcpServer {
             only_drawcalls = req.only_drawcalls,
             include_cbuffers = req.include_cbuffers,
             include_outputs = req.include_outputs,
+            save_thumbnail = req.save_thumbnail,
+            open_capture_ui = req.open_capture_ui,
             "start"
         );
 
@@ -798,6 +841,8 @@ impl RenderdogMcpServer {
 
         let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
 
+        let capture_path = Path::new(&req.capture_path);
+
         let output_dir = req
             .output_dir
             .unwrap_or_else(|| renderdog::default_exports_dir(&cwd).display().to_string());
@@ -806,18 +851,36 @@ impl RenderdogMcpServer {
             .map_err(|e| format!("create output_dir failed: {e}"))?;
 
         let basename = req.basename.unwrap_or_else(|| {
-            Path::new(&req.capture_path)
+            capture_path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("capture")
                 .to_string()
         });
 
-        let res = install
+        let mut thumbnail_output_path: Option<String> = None;
+        if req.save_thumbnail {
+            let thumb_path = req.thumbnail_output_path.unwrap_or_else(|| {
+                Path::new(&output_dir)
+                    .join(format!("{basename}.thumb.png"))
+                    .display()
+                    .to_string()
+            });
+            if let Some(parent) = Path::new(&thumb_path).parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("create thumbnail output dir failed: {e}"))?;
+            }
+            install
+                .save_thumbnail(capture_path, Path::new(&thumb_path))
+                .map_err(|e| format!("save thumbnail failed: {e}"))?;
+            thumbnail_output_path = Some(thumb_path);
+        }
+
+        let bundle = install
             .export_bundle_jsonl(
                 &cwd,
                 &renderdog::ExportBundleRequest {
-                    capture_path: req.capture_path,
+                    capture_path: req.capture_path.clone(),
                     output_dir,
                     basename,
                     only_drawcalls: req.only_drawcalls,
@@ -837,17 +900,29 @@ impl RenderdogMcpServer {
                 format!("export bundle failed: {e}")
             })?;
 
+        let mut ui_pid: Option<u32> = None;
+        if req.open_capture_ui {
+            let child = install
+                .open_capture_in_ui(capture_path)
+                .map_err(|e| format!("open capture UI failed: {e}"))?;
+            ui_pid = Some(child.id());
+        }
+
         tracing::info!(
             tool = "renderdoc_export_bundle_jsonl",
             elapsed_ms = start.elapsed().as_millis(),
-            actions_jsonl_path = %res.actions_jsonl_path,
-            bindings_jsonl_path = %res.bindings_jsonl_path,
-            total_actions = res.total_actions,
-            total_drawcalls = res.total_drawcalls,
+            actions_jsonl_path = %bundle.actions_jsonl_path,
+            bindings_jsonl_path = %bundle.bindings_jsonl_path,
+            total_actions = bundle.total_actions,
+            total_drawcalls = bundle.total_drawcalls,
             "ok"
         );
 
-        Ok(Json(res))
+        Ok(Json(ExportBundleResponse {
+            bundle,
+            thumbnail_output_path,
+            ui_pid,
+        }))
     }
 
     #[tool(
@@ -1042,6 +1117,81 @@ impl RenderdogMcpServer {
             tool = "renderdoc_replay_save_texture_png",
             elapsed_ms = start.elapsed().as_millis(),
             output_path = %res.output_path,
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_replay_save_outputs_png",
+        description = "Save current pipeline output textures (color RTs + optional depth) to PNG via `qrenderdoc --python` replay (headless)."
+    )]
+    async fn replay_save_outputs_png(
+        &self,
+        Parameters(req): Parameters<ReplaySaveOutputsPngRequest>,
+    ) -> Result<Json<renderdog::ReplaySaveOutputsPngResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_replay_save_outputs_png",
+            capture_path = %req.capture_path,
+            event_id = req.event_id,
+            include_depth = req.include_depth,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_replay_save_outputs_png", "failed");
+            tracing::debug!(
+                tool = "renderdoc_replay_save_outputs_png",
+                err = %e,
+                "details"
+            );
+            format!("detect installation failed: {e}")
+        })?;
+        let cwd = std::env::current_dir().map_err(|e| format!("get cwd failed: {e}"))?;
+
+        let output_dir = req.output_dir.unwrap_or_else(|| {
+            renderdog::default_exports_dir(&cwd)
+                .join("replay")
+                .display()
+                .to_string()
+        });
+        std::fs::create_dir_all(&output_dir)
+            .map_err(|e| format!("create output_dir failed: {e}"))?;
+
+        let basename = req.basename.unwrap_or_else(|| {
+            Path::new(&req.capture_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("capture")
+                .to_string()
+        });
+
+        let res = install
+            .replay_save_outputs_png(
+                &cwd,
+                &renderdog::ReplaySaveOutputsPngRequest {
+                    capture_path: req.capture_path,
+                    event_id: req.event_id,
+                    output_dir,
+                    basename,
+                    include_depth: req.include_depth,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_replay_save_outputs_png", "failed");
+                tracing::debug!(
+                    tool = "renderdoc_replay_save_outputs_png",
+                    err = %e,
+                    "details"
+                );
+                format!("replay save outputs failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_replay_save_outputs_png",
+            elapsed_ms = start.elapsed().as_millis(),
+            outputs = res.outputs.len(),
             "ok"
         );
         Ok(Json(res))
@@ -1374,6 +1524,8 @@ impl RenderdogMcpServer {
             only_drawcalls = req.only_drawcalls,
             include_cbuffers = req.include_cbuffers,
             include_outputs = req.include_outputs,
+            save_thumbnail = req.save_thumbnail,
+            open_capture_ui = req.open_capture_ui,
             "start"
         );
 
@@ -1460,8 +1612,8 @@ impl RenderdogMcpServer {
                 &cwd,
                 &renderdog::ExportBundleRequest {
                     capture_path: capture_res.capture_path.clone(),
-                    output_dir,
-                    basename,
+                    output_dir: output_dir.clone(),
+                    basename: basename.clone(),
                     only_drawcalls: req.only_drawcalls,
                     marker_prefix: req.marker_prefix,
                     event_id_min: req.event_id_min,
@@ -1482,6 +1634,32 @@ impl RenderdogMcpServer {
                 );
                 format!("export bundle failed: {e}")
             })?;
+
+        let mut thumbnail_output_path: Option<String> = None;
+        if req.save_thumbnail {
+            let thumb_path = req.thumbnail_output_path.unwrap_or_else(|| {
+                Path::new(&output_dir)
+                    .join(format!("{basename}.thumb.png"))
+                    .display()
+                    .to_string()
+            });
+            if let Some(parent) = Path::new(&thumb_path).parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("create thumbnail output dir failed: {e}"))?;
+            }
+            install
+                .save_thumbnail(Path::new(&export_res.capture_path), Path::new(&thumb_path))
+                .map_err(|e| format!("save thumbnail failed: {e}"))?;
+            thumbnail_output_path = Some(thumb_path);
+        }
+
+        let mut ui_pid: Option<u32> = None;
+        if req.open_capture_ui {
+            let child = install
+                .open_capture_in_ui(Path::new(&export_res.capture_path))
+                .map_err(|e| format!("open capture UI failed: {e}"))?;
+            ui_pid = Some(child.id());
+        }
 
         tracing::info!(
             tool = "renderdoc_capture_and_export_bundle_jsonl",
@@ -1510,6 +1688,9 @@ impl RenderdogMcpServer {
             bindings_jsonl_path: export_res.bindings_jsonl_path,
             bindings_summary_json_path: export_res.bindings_summary_json_path,
             total_drawcalls: export_res.total_drawcalls,
+
+            thumbnail_output_path,
+            ui_pid,
         }))
     }
 }
