@@ -30,9 +30,7 @@ If it cannot be found via the OS loader, set one of:
 - `RENDERDOG_REPLAY_RENDERDOC_SO` (Linux, full path to `librenderdoc.so*`)
 - `RENDERDOG_RENDERDOC_DIR` (install root, shared with `renderdog-automation`)
 
-## Windows linking note
+## Debugging
 
-On Windows, the RenderDoc replay headers use `__declspec(dllimport)` for some API helpers. For this
-experimental crate, enabling `cxx-replay` requires an import library:
-
-- Set `RENDERDOG_REPLAY_RENDERDOC_LIB_DIR` (or `RENDERDOG_RENDERDOC_DIR`) to a directory containing `renderdoc.lib`.
+- `RENDERDOG_REPLAY_TRACE=1`: print high-level steps to stderr.
+- `RENDERDOG_REPLAY_TRACE_ALLOC=1`: also trace array allocations/frees (very noisy).
