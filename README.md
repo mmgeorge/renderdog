@@ -79,11 +79,13 @@ Run the server locally (stdio transport):
 - From crates.io: `renderdog-mcp`
 - From source: `cargo run -p renderdog-mcp`
 
-`renderdog-mcp` provides a one-shot tool that can:
+`renderdog-mcp` provides one-shot tools that can:
 
 1) launch a target with `renderdoccmd capture`
 2) trigger capture via target-control
 3) export searchable artifacts
+
+Recommended: `renderdoc_capture_and_export_bundle_jsonl` (exports both actions + bindings index).
 
 Artifacts:
 

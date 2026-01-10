@@ -17,6 +17,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Export a searchable bindings index (`*.bindings.jsonl`) via `qrenderdoc --python` for fast offline querying.
 - Headless replay helpers (via `qrenderdoc --python`): list textures, pick pixels, and save textures to PNG.
 - MCP replay tools: `renderdoc_replay_list_textures`, `renderdoc_replay_pick_pixel`, `renderdoc_replay_save_texture_png`.
+- MCP one-shot bundle tool: `renderdoc_capture_and_export_bundle_jsonl` (capture + export actions + export bindings index).
 - A practical RenderDoc playbook for validating clip-mask mapping: `docs/playbooks/fret-clip-mask.md`.
 - A recommended adoption workflow section in the workspace README (capture → markers → UI inspection → automation exports).
 

@@ -70,6 +70,38 @@ pub struct ExportBindingsIndexResponse {
     pub total_drawcalls: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ExportBundleRequest {
+    pub capture_path: String,
+    pub output_dir: String,
+    pub basename: String,
+
+    pub only_drawcalls: bool,
+    pub marker_prefix: Option<String>,
+    pub event_id_min: Option<u32>,
+    pub event_id_max: Option<u32>,
+    pub name_contains: Option<String>,
+    pub marker_contains: Option<String>,
+    pub case_sensitive: bool,
+
+    pub include_cbuffers: bool,
+    pub include_outputs: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ExportBundleResponse {
+    pub capture_path: String,
+
+    pub actions_jsonl_path: String,
+    pub actions_summary_json_path: String,
+    pub total_actions: u64,
+    pub drawcall_actions: u64,
+
+    pub bindings_jsonl_path: String,
+    pub bindings_summary_json_path: String,
+    pub total_drawcalls: u64,
+}
+
 #[derive(Debug, Error)]
 pub enum TriggerCaptureError {
     #[error("failed to create artifacts dir: {0}")]
@@ -134,6 +166,14 @@ pub enum ExportBindingsIndexError {
     ReadResponse(std::io::Error),
     #[error("qrenderdoc script error: {0}")]
     ScriptError(String),
+}
+
+#[derive(Debug, Error)]
+pub enum ExportBundleError {
+    #[error("export actions failed: {0}")]
+    Actions(#[from] ExportActionsError),
+    #[error("export bindings index failed: {0}")]
+    Bindings(#[from] ExportBindingsIndexError),
 }
 
 fn remove_if_exists(path: &Path) -> Result<(), std::io::Error> {
@@ -276,6 +316,58 @@ impl RenderDocInstallation {
                 env.error.unwrap_or_else(|| "unknown error".into()),
             ))
         }
+    }
+
+    pub fn export_bundle_jsonl(
+        &self,
+        cwd: &Path,
+        req: &ExportBundleRequest,
+    ) -> Result<ExportBundleResponse, ExportBundleError> {
+        let actions = self.export_actions_jsonl(
+            cwd,
+            &ExportActionsRequest {
+                capture_path: req.capture_path.clone(),
+                output_dir: req.output_dir.clone(),
+                basename: req.basename.clone(),
+                only_drawcalls: req.only_drawcalls,
+                marker_prefix: req.marker_prefix.clone(),
+                event_id_min: req.event_id_min,
+                event_id_max: req.event_id_max,
+                name_contains: req.name_contains.clone(),
+                marker_contains: req.marker_contains.clone(),
+                case_sensitive: req.case_sensitive,
+            },
+        )?;
+
+        let bindings = self.export_bindings_index_jsonl(
+            cwd,
+            &ExportBindingsIndexRequest {
+                capture_path: req.capture_path.clone(),
+                output_dir: req.output_dir.clone(),
+                basename: req.basename.clone(),
+                marker_prefix: req.marker_prefix.clone(),
+                event_id_min: req.event_id_min,
+                event_id_max: req.event_id_max,
+                name_contains: req.name_contains.clone(),
+                marker_contains: req.marker_contains.clone(),
+                case_sensitive: req.case_sensitive,
+                include_cbuffers: req.include_cbuffers,
+                include_outputs: req.include_outputs,
+            },
+        )?;
+
+        Ok(ExportBundleResponse {
+            capture_path: req.capture_path.clone(),
+
+            actions_jsonl_path: actions.actions_jsonl_path,
+            actions_summary_json_path: actions.summary_json_path,
+            total_actions: actions.total_actions,
+            drawcall_actions: actions.drawcall_actions,
+
+            bindings_jsonl_path: bindings.bindings_jsonl_path,
+            bindings_summary_json_path: bindings.summary_json_path,
+            total_drawcalls: bindings.total_drawcalls,
+        })
     }
 }
 
