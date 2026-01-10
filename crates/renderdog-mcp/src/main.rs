@@ -616,9 +616,9 @@ impl RenderdogMcpServer {
             .map(|name| artifacts_dir.join(format!("{name}.rdc")));
 
         let request = renderdog::CaptureLaunchRequest {
-            executable: PathBuf::from(req.executable),
+            executable: resolve_path_from_base(&cwd, &req.executable),
             args: req.args.into_iter().map(OsString::from).collect(),
-            working_dir: req.working_dir.map(PathBuf::from),
+            working_dir: req.working_dir.map(|p| resolve_path_from_base(&cwd, &p)),
             capture_file_template: capture_file_template.clone(),
         };
 
@@ -1379,9 +1379,9 @@ impl RenderdogMcpServer {
             .map(|name| artifacts_dir.join(format!("{name}.rdc")));
 
         let launch_req = renderdog::CaptureLaunchRequest {
-            executable: PathBuf::from(req.executable),
+            executable: resolve_path_from_base(&cwd, &req.executable),
             args: req.args.into_iter().map(OsString::from).collect(),
-            working_dir: req.working_dir.map(PathBuf::from),
+            working_dir: req.working_dir.map(|p| resolve_path_from_base(&cwd, &p)),
             capture_file_template: capture_file_template.clone(),
         };
 
@@ -1536,9 +1536,9 @@ impl RenderdogMcpServer {
             .map(|name| artifacts_dir.join(format!("{name}.rdc")));
 
         let launch_req = renderdog::CaptureLaunchRequest {
-            executable: PathBuf::from(req.executable),
+            executable: resolve_path_from_base(&cwd, &req.executable),
             args: req.args.into_iter().map(OsString::from).collect(),
-            working_dir: req.working_dir.map(PathBuf::from),
+            working_dir: req.working_dir.map(|p| resolve_path_from_base(&cwd, &p)),
             capture_file_template: capture_file_template.clone(),
         };
 
@@ -1694,9 +1694,9 @@ impl RenderdogMcpServer {
             .map(|name| artifacts_dir.join(format!("{name}.rdc")));
 
         let launch_req = renderdog::CaptureLaunchRequest {
-            executable: PathBuf::from(req.executable),
+            executable: resolve_path_from_base(&cwd, &req.executable),
             args: req.args.into_iter().map(OsString::from).collect(),
-            working_dir: req.working_dir.map(PathBuf::from),
+            working_dir: req.working_dir.map(|p| resolve_path_from_base(&cwd, &p)),
             capture_file_template: capture_file_template.clone(),
         };
 

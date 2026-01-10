@@ -37,6 +37,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 - Resolve relative `capture_path`/`output_dir`/`output_path` against the caller working directory (so outputs don't end up under the internal run dir).
 - Fix `renderdoc_replay_save_outputs_png` on Vulkan by handling output targets exposed as `renderdoc.Descriptor` objects.
 - Make headless replay output exports choose a drawcall event by default (instead of `Present`), so outputs are usually non-empty.
+- When using MCP tools with per-call `cwd`, resolve relative `executable`/`working_dir` for capture launch against that base directory.
 
 ## [0.1.0] - 2026-01-09
 
