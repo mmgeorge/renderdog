@@ -26,6 +26,18 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  package:
+    name: Package (smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo package (renderdog-sys)
+        run: cargo package -p renderdog-sys
+      - name: cargo package (renderdog-automation)
+        run: cargo package -p renderdog-automation
+
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
