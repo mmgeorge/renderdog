@@ -8,6 +8,7 @@ use std::{
 use rmcp::{
     Json, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -20,7 +21,11 @@ fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    fmt().with_env_filter(filter).with_target(false).init();
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -546,7 +551,18 @@ struct RenderdogMcpServer {
 }
 
 #[tool_handler(router = self.tool_router)]
-impl rmcp::ServerHandler for RenderdogMcpServer {}
+impl rmcp::ServerHandler for RenderdogMcpServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            instructions: Some(
+                "RenderDoc automation MCP server - capture, analyze, and export GPU frame data"
+                    .into(),
+            ),
+            ..Default::default()
+        }
+    }
+}
 
 #[tool_router(router = tool_router)]
 impl RenderdogMcpServer {
