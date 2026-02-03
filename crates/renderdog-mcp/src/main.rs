@@ -571,6 +571,24 @@ struct SearchResourcesRequest {
     resource_types: Option<Vec<String>>,
 }
 
+fn default_include_pipeline_info() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct FindResourceUsesRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    /// Resource name or ID to find uses of. Can be exact name, partial name, or numeric ID.
+    resource: String,
+    #[serde(default = "default_max_search_results")]
+    max_results: Option<u32>,
+    /// Include pipeline info at each event (slower but more detailed). Default true.
+    #[serde(default = "default_include_pipeline_info")]
+    include_pipeline_info: bool,
+}
+
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum FindEventSelection {
@@ -1496,6 +1514,57 @@ impl RenderdogMcpServer {
             elapsed_ms = start.elapsed().as_millis(),
             total_matches = res.total_matches,
             truncated = res.truncated,
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_find_resource_uses",
+        description = "Find all uses of a resource in a .rdc capture. Returns event IDs, usage types (VertexBuffer, ColorTarget, PS_Resource, CS_RWResource, etc.), and optionally pipeline/binding info.\n\nUsage types include: VertexBuffer, IndexBuffer, VS/PS/CS_Constants (uniform buffers), VS/PS/CS_Resource (textures/samplers), VS/PS/CS_RWResource (storage buffers/images), ColorTarget, DepthStencilTarget, InputTarget, Indirect, Clear, Copy, CopySrc, CopyDst, etc."
+    )]
+    async fn find_resource_uses(
+        &self,
+        Parameters(req): Parameters<FindResourceUsesRequest>,
+    ) -> Result<Json<renderdog::FindResourceUsesResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_find_resource_uses",
+            capture_path = %req.capture_path,
+            resource = %req.resource,
+            include_pipeline_info = req.include_pipeline_info,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_find_resource_uses", "failed");
+            tracing::debug!(tool = "renderdoc_find_resource_uses", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .find_resource_uses(
+                &cwd,
+                &renderdog::FindResourceUsesRequest {
+                    capture_path: req.capture_path,
+                    resource: req.resource,
+                    max_results: req.max_results,
+                    include_pipeline_info: req.include_pipeline_info,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_find_resource_uses", "failed");
+                tracing::debug!(tool = "renderdoc_find_resource_uses", err = %e, "details");
+                format!("find resource uses failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_find_resource_uses",
+            elapsed_ms = start.elapsed().as_millis(),
+            resource_name = %res.resource_name,
+            total_uses = res.total_uses,
             "ok"
         );
         Ok(Json(res))

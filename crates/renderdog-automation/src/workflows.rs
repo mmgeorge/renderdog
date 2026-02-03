@@ -442,6 +442,65 @@ pub struct SearchResourcesResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FindResourceUsesRequest {
+    /// Path to the .rdc capture file.
+    pub capture_path: String,
+    /// Resource name or ID to find uses of. Can be an exact name, partial name, or numeric ID.
+    pub resource: String,
+    /// Maximum number of uses to return. Default is 500.
+    #[serde(default = "default_max_search_results")]
+    pub max_results: Option<u32>,
+    /// Whether to include pipeline info at each event (slower but more detailed). Default is true.
+    #[serde(default = "default_include_pipeline_info")]
+    pub include_pipeline_info: bool,
+}
+
+fn default_include_pipeline_info() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ResourceUse {
+    /// The event ID where the resource is used.
+    pub event_id: u32,
+    /// How the resource is used (e.g., VertexBuffer, ColorTarget, PS_Resource, CS_RWResource).
+    pub usage: String,
+    /// The view through which the resource is accessed (if applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_id: Option<u64>,
+    /// Name of the view (if applicable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_name: Option<String>,
+    /// Name of the pipeline at this event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_name: Option<String>,
+    /// Type of pipeline (Graphics or Compute).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_type: Option<String>,
+    /// Shader stage (Vertex, Fragment, Compute, etc.) for stage-specific usages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
+    /// Entry point name for shader resources.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_point: Option<String>,
+    /// Additional detail about the usage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct FindResourceUsesResponse {
+    pub capture_path: String,
+    pub resource_query: String,
+    pub resource_id: u64,
+    pub resource_name: String,
+    pub resource_type: String,
+    pub total_uses: u64,
+    pub truncated: bool,
+    pub uses: Vec<ResourceUse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ExportBindingsIndexRequest {
     pub capture_path: String,
     pub output_dir: String,
@@ -747,6 +806,30 @@ pub enum SearchResourcesError {
 }
 
 impl From<crate::QRenderDocPythonError> for SearchResourcesError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum FindResourceUsesError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for FindResourceUsesError {
     fn from(value: crate::QRenderDocPythonError) -> Self {
         Self::QRenderDocPython(Box::new(value))
     }
@@ -1199,6 +1282,57 @@ impl RenderDocInstallation {
         }
     }
 
+    pub fn find_resource_uses(
+        &self,
+        cwd: &Path,
+        req: &FindResourceUsesRequest,
+    ) -> Result<FindResourceUsesResponse, FindResourceUsesError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir).map_err(FindResourceUsesError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("find_resource_uses_json.py");
+        write_script_file(&script_path, FIND_RESOURCE_USES_JSON_PY)
+            .map_err(FindResourceUsesError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "find_resource_uses")
+            .map_err(FindResourceUsesError::CreateScriptsDir)?;
+        let request_path = run_dir.join("find_resource_uses_json.request.json");
+        let response_path = run_dir.join("find_resource_uses_json.response.json");
+        remove_if_exists(&response_path).map_err(FindResourceUsesError::WriteRequest)?;
+
+        let req = FindResourceUsesRequest {
+            capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
+            resource: req.resource.clone(),
+            max_results: req.max_results,
+            include_pipeline_info: req.include_pipeline_info,
+        };
+
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(&req).map_err(FindResourceUsesError::ParseJson)?,
+        )
+        .map_err(FindResourceUsesError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+        let _ = result;
+
+        let bytes = std::fs::read(&response_path).map_err(FindResourceUsesError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<FindResourceUsesResponse> =
+            serde_json::from_slice(&bytes).map_err(FindResourceUsesError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| FindResourceUsesError::ScriptError("missing result".into()))
+        } else {
+            Err(FindResourceUsesError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
     pub fn export_bindings_index_jsonl(
         &self,
         cwd: &Path,
@@ -1328,3 +1462,5 @@ const GET_RESOURCE_CHANGED_EVENT_IDS_JSON_PY: &str =
     include_str!("../scripts/get_resource_changed_event_ids_json.py");
 
 const SEARCH_RESOURCES_JSON_PY: &str = include_str!("../scripts/search_resources_json.py");
+
+const FIND_RESOURCE_USES_JSON_PY: &str = include_str!("../scripts/find_resource_uses_json.py");
