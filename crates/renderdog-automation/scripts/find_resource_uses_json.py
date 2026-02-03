@@ -16,23 +16,15 @@ Request parameters:
   - resource: Resource name or ID to find (required)
   - capture_path: Path to the RenderDoc capture file (required)
   - max_results: Maximum number of uses to return (default 500)
-  - include_pipeline_info: Include pipeline/shader info (default true)
-  - check_data_changed: If true, compare actual binary data to detect writes.
-                        If false (default), use binding-based heuristics (faster).
   - data_sample_bytes: Max bytes to read when comparing data (default 64KB).
                        Set to 0 to read entire resource.
+  - max_changed_elements: Max number of changed buffer elements to report (default 3).
 
 is_write field:
-  When check_data_changed=false (default):
-    - Uses binding-based heuristics to determine if the resource COULD be written
-    - For RW resources/render targets, checks if actually bound as write target
-    - Fast but may report is_write=true even if no bytes actually changed
-
-  When check_data_changed=true:
-    - Reads actual binary data at each event and compares with previous state
-    - is_write=true only when bytes actually differ from previous read
-    - Slower but more accurate for detecting real modifications
-    - is_write=null for the first event (no previous state to compare)
+  - Compares actual binary data at each event with the previous state
+  - is_write=true only when bytes actually differ from previous read
+  - is_write=null for the first event (no previous state to compare)
+  - For buffers with shader reflection, shows semantic field-level diffs
 
 ResourceUsage values:
   - Unused, VertexBuffer, IndexBuffer
@@ -1068,9 +1060,8 @@ def main() -> None:
 
     resource_query = req["resource"]
     max_results = req.get("max_results", 500)
-    include_pipeline_info = req.get("include_pipeline_info", True)
-    check_data_changed = req.get("check_data_changed", False)
     data_sample_bytes = req.get("data_sample_bytes") or (64 * 1024)  # 64KB default
+    max_changed_elements = req.get("max_changed_elements") or 3  # How many changed elements to report
 
     rd.InitialiseReplay(rd.GlobalEnvironment(), [])
 
@@ -1099,7 +1090,7 @@ def main() -> None:
             # Try to infer buffer struct layout from shader reflection
             buffer_fields = None
             buffer_stride = None
-            if check_data_changed and resource_type == "Buffer":
+            if resource_type == "Buffer":
                 try:
                     buffer_fields, buffer_stride = infer_buffer_layout(
                         controller, resource_desc.resourceId
@@ -1136,117 +1127,91 @@ def main() -> None:
                     "usage": usage_str,
                 }
 
-                # Determine is_write based on mode
-                if check_data_changed:
-                    # Actual data comparison mode
-                    # For read-only usages, skip data comparison
-                    if usage_str in ("CopySrc", "ResolveSrc", "Indirect", "VertexBuffer", "IndexBuffer"):
-                        use_entry["is_write"] = False
-                        use_entry["write_check"] = "read_only_usage"
-                    elif usage_str.endswith("_Constants") or (usage_str.endswith("_Resource") and "RW" not in usage_str):
-                        use_entry["is_write"] = False
-                        use_entry["write_check"] = "read_only_usage"
-                    else:
-                        # For potential write usages, compare actual data
-                        controller.SetFrameEvent(event_id, True)  # replay TO this event
-                        current_data, read_error = read_resource_data(controller, resource_desc, data_sample_bytes)
+                # Determine is_write by comparing actual data
+                # For read-only usages, skip data comparison
+                if usage_str in ("CopySrc", "ResolveSrc", "Indirect", "VertexBuffer", "IndexBuffer"):
+                    use_entry["is_write"] = False
+                    use_entry["write_check"] = "read_only_usage"
+                elif usage_str.endswith("_Constants") or (usage_str.endswith("_Resource") and "RW" not in usage_str):
+                    use_entry["is_write"] = False
+                    use_entry["write_check"] = "read_only_usage"
+                else:
+                    # For potential write usages, compare actual data
+                    controller.SetFrameEvent(event_id, True)  # replay TO this event
+                    current_data, read_error = read_resource_data(controller, resource_desc, data_sample_bytes)
 
-                        if current_data is not None:
-                            if last_data is None:
-                                # First time reading data - can't determine if changed
-                                # Check if it's bound as a write target
-                                is_write_target = is_bound_as_write_target(
-                                    controller, resource_desc.resourceId, event_id
-                                )
-                                if is_write_target:
-                                    # Could have been written, but we don't know for sure
-                                    use_entry["is_write"] = None
-                                    use_entry["write_check"] = "first_read_no_baseline"
-                                    use_entry["data_size"] = len(current_data)
-                                else:
-                                    use_entry["is_write"] = False
-                                    use_entry["write_check"] = "first_read_not_bound"
-                                    use_entry["data_size"] = len(current_data)
+                    if current_data is not None:
+                        if last_data is None:
+                            # First time reading data - can't determine if changed
+                            # Check if it's bound as a write target
+                            is_write_target = is_bound_as_write_target(
+                                controller, resource_desc.resourceId, event_id
+                            )
+                            if is_write_target:
+                                # Could have been written, but we don't know for sure
+                                use_entry["is_write"] = None
+                                use_entry["write_check"] = "first_read_no_baseline"
+                                use_entry["data_size"] = len(current_data)
                             else:
-                                # Compare with previous data
-                                if current_data != last_data:
-                                    use_entry["is_write"] = True
-                                    use_entry["write_check"] = "data_changed"
-                                    use_entry["previous_event_id"] = last_data_event
-                                    use_entry["data_size"] = len(current_data)
+                                use_entry["is_write"] = False
+                                use_entry["write_check"] = "first_read_not_bound"
+                                use_entry["data_size"] = len(current_data)
+                        else:
+                            # Compare with previous data
+                            if current_data != last_data:
+                                use_entry["is_write"] = True
+                                use_entry["write_check"] = "data_changed"
+                                use_entry["previous_event_id"] = last_data_event
+                                use_entry["data_size"] = len(current_data)
 
-                                    # Compute delta showing which elements changed
-                                    if buffer_fields and buffer_stride:
-                                        # Use semantic diff with element indices
-                                        changed_elements = find_changed_buffer_elements(
-                                            buffer_fields, buffer_stride,
-                                            last_data, current_data,
-                                            max_elements=3
-                                        )
-                                        if changed_elements:
-                                            num_elements = len(current_data) // buffer_stride
-                                            use_entry["delta"] = {
-                                                "type": "buffer_elements",
-                                                "total_elements": num_elements,
-                                                "changed": changed_elements,
-                                            }
-                                        else:
-                                            # Changed but couldn't parse elements - show byte regions
-                                            byte_regions = find_changed_bytes_region(last_data, current_data)
-                                            if byte_regions:
-                                                use_entry["delta"] = {
-                                                    "type": "byte_regions",
-                                                    "changed": byte_regions,
-                                                }
+                                # Compute delta showing which elements changed
+                                if buffer_fields and buffer_stride:
+                                    # Use semantic diff with element indices
+                                    changed_elements = find_changed_buffer_elements(
+                                        buffer_fields, buffer_stride,
+                                        last_data, current_data,
+                                        max_elements=max_changed_elements
+                                    )
+                                    if changed_elements:
+                                        num_elements = len(current_data) // buffer_stride
+                                        use_entry["delta"] = {
+                                            "type": "buffer_elements",
+                                            "total_elements": num_elements,
+                                            "changed": changed_elements,
+                                        }
                                     else:
-                                        # No buffer layout - show byte regions
+                                        # Changed but couldn't parse elements - show byte regions
                                         byte_regions = find_changed_bytes_region(last_data, current_data)
                                         if byte_regions:
                                             use_entry["delta"] = {
                                                 "type": "byte_regions",
-                                                "total_bytes": len(current_data),
                                                 "changed": byte_regions,
                                             }
                                 else:
-                                    use_entry["is_write"] = False
-                                    use_entry["write_check"] = "data_unchanged"
-                                    use_entry["data_size"] = len(current_data)
+                                    # No buffer layout - show byte regions
+                                    byte_regions = find_changed_bytes_region(last_data, current_data)
+                                    if byte_regions:
+                                        use_entry["delta"] = {
+                                            "type": "byte_regions",
+                                            "total_bytes": len(current_data),
+                                            "changed": byte_regions,
+                                        }
+                            else:
+                                use_entry["is_write"] = False
+                                use_entry["write_check"] = "data_unchanged"
+                                use_entry["data_size"] = len(current_data)
 
-                            last_data = current_data
-                            last_data_event = event_id
-                        else:
-                            # Couldn't read data - fall back to binding check
-                            use_entry["write_check"] = "data_read_failed"
-                            use_entry["read_error"] = read_error
-                            is_write_target = is_bound_as_write_target(
-                                controller, resource_desc.resourceId, event_id
-                            )
-                            if is_write_target is not None:
-                                use_entry["is_write"] = is_write_target
-                else:
-                    # Binding-based heuristic mode (faster)
-                    if usage_str in ("Clear", "CopyDst", "ResolveDst", "GenMips", "CPUWrite", "Discard"):
-                        use_entry["is_write"] = True
-                        use_entry["write_check"] = "write_usage_type"
-                    elif usage_str in ("CopySrc", "ResolveSrc", "Indirect", "VertexBuffer", "IndexBuffer"):
-                        use_entry["is_write"] = False
-                        use_entry["write_check"] = "read_usage_type"
-                    elif usage_str.endswith("_Constants") or (usage_str.endswith("_Resource") and "RW" not in usage_str):
-                        use_entry["is_write"] = False
-                        use_entry["write_check"] = "read_usage_type"
+                        last_data = current_data
+                        last_data_event = event_id
                     else:
-                        # Check actual bindings
-                        try:
-                            is_write_target = is_bound_as_write_target(
-                                controller, resource_desc.resourceId, event_id
-                            )
-                            if is_write_target is not None:
-                                use_entry["is_write"] = is_write_target
-                                use_entry["write_check"] = "bound_as_rw" if is_write_target else "not_bound_as_rw"
-                        except Exception:
-                            heuristic = is_write_usage(usage_str)
-                            if heuristic is not None:
-                                use_entry["is_write"] = heuristic
+                        # Couldn't read data - fall back to binding check
+                        use_entry["write_check"] = "data_read_failed"
+                        use_entry["read_error"] = read_error
+                        is_write_target = is_bound_as_write_target(
+                            controller, resource_desc.resourceId, event_id
+                        )
+                        if is_write_target is not None:
+                            use_entry["is_write"] = is_write_target
 
                 # Add view info if available
                 if usage.view != rd.ResourceId.Null():
@@ -1254,14 +1219,13 @@ def main() -> None:
                     use_entry["view_name"] = get_name(id_to_name, usage.view)
 
                 # Get pipeline info for this event
-                if include_pipeline_info:
-                    try:
-                        pipeline_info = get_pipeline_info_at_event(
-                            controller, id_to_name, event_id, resource_id, usage_str
-                        )
-                        use_entry.update(pipeline_info)
-                    except Exception:
-                        pass
+                try:
+                    pipeline_info = get_pipeline_info_at_event(
+                        controller, id_to_name, event_id, resource_id, usage_str
+                    )
+                    use_entry.update(pipeline_info)
+                except Exception:
+                    pass
 
                 uses.append(use_entry)
 
@@ -1275,7 +1239,6 @@ def main() -> None:
                 "resource_id": resource_id,
                 "resource_name": resource_name,
                 "resource_type": resource_type,
-                "check_data_changed": check_data_changed,
                 "total_uses": len(uses),
                 "truncated": max_results and len(uses) >= max_results,
                 "uses": uses,

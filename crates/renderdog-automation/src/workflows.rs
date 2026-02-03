@@ -450,22 +450,17 @@ pub struct FindResourceUsesRequest {
     /// Maximum number of uses to return. Default is 500.
     #[serde(default = "default_max_search_results")]
     pub max_results: Option<u32>,
-    /// Whether to include pipeline info at each event (slower but more detailed). Default is true.
-    #[serde(default = "default_include_pipeline_info")]
-    pub include_pipeline_info: bool,
-    /// If true, compare actual binary data at each event to detect real writes.
-    /// If false (default), use binding-based heuristics (faster but less accurate).
-    /// When true, is_write will only be true if bytes actually changed.
-    #[serde(default)]
-    pub check_data_changed: bool,
     /// Maximum bytes to read when comparing data (default 64KB).
-    /// Set to 0 to read entire resource. Only used when check_data_changed is true.
+    /// Set to 0 to read entire resource.
     #[serde(default = "default_data_sample_bytes")]
     pub data_sample_bytes: Option<u32>,
+    /// Maximum number of changed buffer elements to report in delta (default 3).
+    #[serde(default = "default_max_changed_elements")]
+    pub max_changed_elements: Option<u32>,
 }
 
-fn default_include_pipeline_info() -> bool {
-    true
+fn default_max_changed_elements() -> Option<u32> {
+    Some(3)
 }
 
 fn default_data_sample_bytes() -> Option<u32> {
@@ -536,8 +531,6 @@ pub struct FindResourceUsesResponse {
     pub resource_id: u64,
     pub resource_name: String,
     pub resource_type: String,
-    /// Whether data comparison was used to detect writes (vs binding heuristics).
-    pub check_data_changed: bool,
     pub total_uses: u64,
     pub truncated: bool,
     pub uses: Vec<ResourceUse>,
@@ -1361,9 +1354,8 @@ impl RenderDocInstallation {
             capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
             resource: req.resource.clone(),
             max_results: req.max_results,
-            include_pipeline_info: req.include_pipeline_info,
-            check_data_changed: req.check_data_changed,
             data_sample_bytes: req.data_sample_bytes,
+            max_changed_elements: req.max_changed_elements,
         };
 
         std::fs::write(

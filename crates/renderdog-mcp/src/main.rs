@@ -571,10 +571,6 @@ struct SearchResourcesRequest {
     resource_types: Option<Vec<String>>,
 }
 
-fn default_include_pipeline_info() -> bool {
-    true
-}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FindResourceUsesRequest {
     #[serde(default)]
@@ -584,16 +580,12 @@ struct FindResourceUsesRequest {
     resource: String,
     #[serde(default = "default_max_search_results")]
     max_results: Option<u32>,
-    /// Include pipeline info at each event (slower but more detailed). Default true.
-    #[serde(default = "default_include_pipeline_info")]
-    include_pipeline_info: bool,
-    /// If true, compare actual binary data to detect writes. If false (default), use binding heuristics.
-    /// When true, is_write will only be true if bytes actually changed (slower but more accurate).
-    #[serde(default)]
-    check_data_changed: bool,
-    /// Max bytes to read when comparing data (default 64KB). Only used when check_data_changed=true.
+    /// Max bytes to read when comparing data (default 64KB).
     #[serde(default)]
     data_sample_bytes: Option<u32>,
+    /// Max changed buffer elements to report in delta (default 3).
+    #[serde(default)]
+    max_changed_elements: Option<u32>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
@@ -1539,8 +1531,6 @@ impl RenderdogMcpServer {
             tool = "renderdoc_find_resource_uses",
             capture_path = %req.capture_path,
             resource = %req.resource,
-            include_pipeline_info = req.include_pipeline_info,
-            check_data_changed = req.check_data_changed,
             "start"
         );
 
@@ -1559,9 +1549,8 @@ impl RenderdogMcpServer {
                     capture_path: req.capture_path,
                     resource: req.resource,
                     max_results: req.max_results,
-                    include_pipeline_info: req.include_pipeline_info,
-                    check_data_changed: req.check_data_changed,
                     data_sample_bytes: req.data_sample_bytes,
+                    max_changed_elements: req.max_changed_elements,
                 },
             )
             .map_err(|e| {
