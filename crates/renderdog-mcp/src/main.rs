@@ -1520,7 +1520,7 @@ impl RenderdogMcpServer {
 
     #[tool(
         name = "renderdoc_find_resource_uses",
-        description = "Find all uses of a resource in a .rdc capture. Returns event IDs, usage types, and whether each event modified the resource.\n\nUsage types: VertexBuffer, IndexBuffer, VS/PS/CS_Constants (uniform buffers), VS/PS/CS_Resource (textures/samplers), VS/PS/CS_RWResource (storage buffers/images), ColorTarget, DepthStencilTarget, InputTarget, Indirect, Clear, Copy, CopySrc, CopyDst, etc.\n\nThe is_write field indicates if the resource was modified. By default uses binding heuristics (fast). Set check_data_changed=true to compare actual binary data (slower but detects real changes)."
+        description = "Find all uses of a resource in a .rdc capture. Returns event IDs, usage types, and detects actual data changes.\n\nUsage types: VertexBuffer, IndexBuffer, VS/PS/CS_Constants (uniform buffers), VS/PS/CS_Resource (textures/samplers), VS/PS/CS_RWResource (storage buffers/images), ColorTarget, DepthStencilTarget, InputTarget, Indirect, Clear, Copy, CopySrc, CopyDst, etc.\n\nThe has_delta field indicates if data actually changed (via binary comparison). When true, delta shows what changed: for buffers with shader reflection {element, fields}, otherwise {offset, length, old_hex, new_hex}. Use delta_filter to return only events with/without changes."
     )]
     async fn find_resource_uses(
         &self,
