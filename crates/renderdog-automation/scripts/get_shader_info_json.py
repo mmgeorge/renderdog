@@ -1,9 +1,12 @@
 """
-get_shader_info_json.py -- RenderDoc Python script that returns JSON info about a shader.
+get_shader_info_json.py -- RenderDoc Python script that returns JSON info about shaders.
 
-Given a pipeline name and entry point, finds the matching shader stage in the
-capture and returns a JSON object with:
+Given a pipeline name and optional entry point filter, finds all matching shader stages
+in the capture and returns a JSON array of shader info objects, each containing:
 
+  - entry_point
+  - stage
+  - event_id
   - source_files (paths + sizes from SPIR-V debug info)
   - encoding
   - read_write_resources
@@ -11,6 +14,9 @@ capture and returns a JSON object with:
   - constant_blocks
   - samplers
   - input_signature
+
+If entry_points filter is not provided or empty, returns info for all entry points
+found in the pipeline.
 """
 
 import json
@@ -49,7 +55,7 @@ def get_name(names, rid):
 
 
 # ---------------------------------------------------------------------------
-# Find the pipeline + entry point
+# Find the pipeline + entry points
 # ---------------------------------------------------------------------------
 
 _ALL_STAGES = [
@@ -79,15 +85,23 @@ def leaves(roots):
             yield a
 
 
-def find_shader(controller, names, pipeline_name, entry_point):
+def find_all_shaders(controller, names, pipeline_name, entry_points_filter):
     """
-    Scan actions to find the shader stage that matches pipeline_name +
-    entry_point.  Returns (action, stage, entry_point_str).
+    Scan actions to find all shader stages that match pipeline_name and
+    optionally filter by entry_points.
+
+    Returns list of (action, stage, entry_point_str) tuples.
     """
     if not pipeline_name:
         raise RuntimeError("pipeline_name is required")
-    if not entry_point:
-        raise RuntimeError("entry_point is required")
+
+    # Convert filter to a set for fast lookup, None means no filter
+    filter_set = None
+    if entry_points_filter:
+        filter_set = set(entry_points_filter)
+
+    results = []
+    seen = set()  # Track (stage, entry_point) pairs to avoid duplicates
 
     for action in leaves(controller.GetRootActions()):
         controller.SetFrameEvent(action.eventId, False)
@@ -103,6 +117,16 @@ def find_shader(controller, names, pipeline_name, entry_point):
         except Exception:
             pass
 
+        # Also check compute pipeline
+        if not pipe_match:
+            try:
+                pipe_id = state.GetComputePipelineObject()
+                if pipe_id != rd.ResourceId.Null():
+                    if get_name(names, pipe_id) == pipeline_name:
+                        pipe_match = True
+            except Exception:
+                pass
+
         for stage in _ALL_STAGES:
             refl = state.GetShaderReflection(stage)
             if refl is None:
@@ -113,7 +137,7 @@ def find_shader(controller, names, pipeline_name, entry_point):
             if not pipe_match and shader_name != pipeline_name:
                 continue
 
-            # Does the entry point match?
+            # Get entry point
             try:
                 ep = state.GetShaderEntryPoint(stage)
             except Exception:
@@ -121,14 +145,19 @@ def find_shader(controller, names, pipeline_name, entry_point):
             if not ep:
                 ep = "main"
 
-            if ep == entry_point:
-                return action, stage, ep
+            # Apply entry point filter if specified
+            if filter_set is not None and ep not in filter_set:
+                continue
 
-    raise RuntimeError(
-        "Could not find pipeline '%s' with entry point '%s' in any action. "
-        "Check the Resource Inspector for available names."
-        % (pipeline_name, entry_point)
-    )
+            # Avoid duplicates
+            key = (stage, ep)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            results.append((action, stage, ep))
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +290,7 @@ def main() -> None:
         req = json.load(f)
 
     pipeline_name = req["pipeline_name"]
-    entry_point = req.get("entry_point", "main")
+    entry_points_filter = req.get("entry_points", None)  # Optional array
 
     rd.InitialiseReplay(rd.GlobalEnvironment(), [])
 
@@ -281,25 +310,42 @@ def main() -> None:
         try:
             names = build_name_map(controller)
 
-            # Find the action + stage matching our pipeline + entry point
-            action, stage, ep = find_shader(controller, names, pipeline_name, entry_point)
-            stage_name = _STAGE_NAMES.get(stage, str(stage))
+            # Find all matching shaders
+            shader_matches = find_all_shaders(controller, names, pipeline_name, entry_points_filter)
 
-            # Move to that action and extract
-            controller.SetFrameEvent(action.eventId, False)
-            state = controller.GetPipelineState()
+            if not shader_matches:
+                filter_msg = ""
+                if entry_points_filter:
+                    filter_msg = " with entry points %s" % entry_points_filter
+                raise RuntimeError(
+                    "Could not find pipeline '%s'%s in any action. "
+                    "Check the Resource Inspector for available names."
+                    % (pipeline_name, filter_msg)
+                )
 
-            info = extract_info(state, stage, names)
+            # Extract info for each shader
+            shaders = []
+            for action, stage, ep in shader_matches:
+                controller.SetFrameEvent(action.eventId, False)
+                state = controller.GetPipelineState()
+
+                info = extract_info(state, stage, names)
+
+                shader_entry = {
+                    "entry_point": ep,
+                    "stage": _STAGE_NAMES.get(stage, str(stage)),
+                    "event_id": int(action.eventId),
+                }
+                shader_entry.update(info)
+                shaders.append(shader_entry)
 
             # Build result
             document = {
                 "capture_path": req["capture_path"],
                 "pipeline_name": pipeline_name,
-                "entry_point": ep,
-                "stage": stage_name,
-                "event_id": int(action.eventId),
+                "entry_points_filter": entry_points_filter,
+                "shaders": shaders,
             }
-            document.update(info)
 
             write_envelope(True, result=document)
         finally:

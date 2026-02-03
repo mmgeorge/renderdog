@@ -116,12 +116,9 @@ pub struct GetEventsResponse {
 pub struct GetShaderInfoRequest {
     pub capture_path: String,
     pub pipeline_name: String,
-    #[serde(default = "default_entry_point")]
-    pub entry_point: String,
-}
-
-fn default_entry_point() -> String {
-    "main".to_string()
+    /// Optional list of entry points to filter by. If not provided, returns all entry points.
+    #[serde(default)]
+    pub entry_points: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -171,9 +168,7 @@ pub struct ShaderInputSignature {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetShaderInfoResponse {
-    pub capture_path: String,
-    pub pipeline_name: String,
+pub struct ShaderInfo {
     pub entry_point: String,
     pub stage: String,
     pub event_id: u32,
@@ -193,6 +188,15 @@ pub struct GetShaderInfoResponse {
     pub samplers: Vec<ShaderSampler>,
     #[serde(default)]
     pub input_signature: Vec<ShaderInputSignature>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetShaderInfoResponse {
+    pub capture_path: String,
+    pub pipeline_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_points_filter: Option<Vec<String>>,
+    pub shaders: Vec<ShaderInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -958,7 +962,7 @@ impl RenderDocInstallation {
         let req = GetShaderInfoRequest {
             capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
             pipeline_name: req.pipeline_name.clone(),
-            entry_point: req.entry_point.clone(),
+            entry_points: req.entry_points.clone(),
         };
 
         std::fs::write(

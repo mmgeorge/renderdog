@@ -509,12 +509,9 @@ struct GetShaderInfoRequest {
     cwd: Option<String>,
     capture_path: String,
     pipeline_name: String,
-    #[serde(default = "default_entry_point")]
-    entry_point: String,
-}
-
-fn default_entry_point() -> String {
-    "main".to_string()
+    /// Optional list of entry points to filter by. If not provided, returns all entry points found in the pipeline.
+    #[serde(default)]
+    entry_points: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1256,7 +1253,7 @@ impl RenderdogMcpServer {
 
     #[tool(
         name = "renderdoc_get_shader_info",
-        description = "Get detailed shader information (source files, resources, constant blocks, samplers, input signature) for a specific pipeline and entry point in a .rdc capture."
+        description = "Get detailed shader information (source files, resources, constant blocks, samplers, input signature) for a pipeline in a .rdc capture. Returns an array of shader info for all entry points, or filtered by the optional entry_points parameter."
     )]
     async fn get_shader_info(
         &self,
@@ -1267,7 +1264,7 @@ impl RenderdogMcpServer {
             tool = "renderdoc_get_shader_info",
             capture_path = %req.capture_path,
             pipeline_name = %req.pipeline_name,
-            entry_point = %req.entry_point,
+            entry_points = ?req.entry_points,
             "start"
         );
 
@@ -1285,7 +1282,7 @@ impl RenderdogMcpServer {
                 &renderdog::GetShaderInfoRequest {
                     capture_path: req.capture_path,
                     pipeline_name: req.pipeline_name,
-                    entry_point: req.entry_point,
+                    entry_points: req.entry_points,
                 },
             )
             .map_err(|e| {
@@ -1297,8 +1294,7 @@ impl RenderdogMcpServer {
         tracing::info!(
             tool = "renderdoc_get_shader_info",
             elapsed_ms = start.elapsed().as_millis(),
-            stage = %res.stage,
-            source_files = res.source_files.len(),
+            shaders_count = res.shaders.len(),
             "ok"
         );
         Ok(Json(res))
