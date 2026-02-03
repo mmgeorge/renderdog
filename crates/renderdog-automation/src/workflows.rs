@@ -454,13 +454,13 @@ pub struct FindResourceUsesRequest {
     /// Set to 0 to read entire resource.
     #[serde(default = "default_data_sample_bytes")]
     pub data_sample_bytes: Option<u32>,
-    /// Maximum number of changed buffer elements to report in delta (default 3).
-    #[serde(default = "default_max_changed_elements")]
-    pub max_changed_elements: Option<u32>,
+    /// Filter results by delta presence: "all" (default), "with_delta", "without_delta".
+    #[serde(default = "default_delta_filter")]
+    pub delta_filter: Option<String>,
 }
 
-fn default_max_changed_elements() -> Option<u32> {
-    Some(3)
+fn default_delta_filter() -> Option<String> {
+    Some("all".to_string())
 }
 
 fn default_data_sample_bytes() -> Option<u32> {
@@ -473,34 +473,17 @@ pub struct ResourceUse {
     pub event_id: u32,
     /// How the resource is used (e.g., VertexBuffer, ColorTarget, PS_Resource, CS_RWResource).
     pub usage: String,
-    /// Whether this event modified the resource.
-    /// When check_data_changed=false: based on binding heuristics (could write but might not).
-    /// When check_data_changed=true: based on actual data comparison (bytes really changed).
+    /// Whether the resource data changed at this event.
+    /// Based on actual binary data comparison between events.
     /// None for unknown/ambiguous usages or first event when comparing data.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_write: Option<bool>,
-    /// When is_write=true and check_data_changed=true, this shows what data changed.
-    /// Contains fields like: total_u32s_compared, u32s_changed, first_diffs (array of changes).
-    /// Each diff in first_diffs has: index, offset, old_u32, new_u32, and optionally old_f32/new_f32.
+    pub has_delta: Option<bool>,
+    /// When has_delta=true, this shows what data changed.
+    /// For buffers with shader reflection: {element: N, fields: {...}}
+    /// For other resources: {offset: N, length: N, old_hex: "...", new_hex: "..."}
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "any_json_schema::schema")]
     pub delta: Option<serde_json::Value>,
-    /// Event ID of the previous data state that we compared against (when delta is present).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub previous_event_id: Option<u32>,
-    /// How is_write was determined. Values include:
-    /// - "data_changed" / "data_unchanged": actual binary comparison (check_data_changed=true)
-    /// - "first_read_no_baseline" / "first_read_not_bound": first data read, no previous to compare
-    /// - "data_read_failed": couldn't read data, fell back to binding check
-    /// - "bound_as_rw" / "not_bound_as_rw": binding heuristic (check_data_changed=false)
-    /// - "write_usage_type" / "read_usage_type": determined by usage type alone
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub write_check: Option<String>,
-    /// Size of data read (when check_data_changed=true and data was readable).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data_size: Option<u64>,
-    /// Error message if data read failed (when write_check="data_read_failed").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub read_error: Option<String>,
     /// The view through which the resource is accessed (if applicable).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_id: Option<u64>,
@@ -510,9 +493,6 @@ pub struct ResourceUse {
     /// Name of the pipeline at this event.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline_name: Option<String>,
-    /// Type of pipeline (Graphics or Compute).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pipeline_type: Option<String>,
     /// Shader stage (Vertex, Fragment, Compute, etc.) for stage-specific usages.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stage: Option<String>,
@@ -526,28 +506,9 @@ pub struct ResourceUse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct FindResourceUsesResponse {
-    pub capture_path: String,
-    pub resource_query: String,
-    pub resource_id: u64,
-    pub resource_name: String,
-    pub resource_type: String,
     pub total_uses: u64,
     pub truncated: bool,
     pub uses: Vec<ResourceUse>,
-    /// Buffer struct layout inferred from shader reflection (if available).
-    /// When present, deltas will show semantic field names instead of raw u32 offsets.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub buffer_layout: Option<BufferLayoutInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct BufferLayoutInfo {
-    /// Stride in bytes per element.
-    pub stride: u32,
-    /// Number of fields in the struct.
-    pub field_count: u32,
-    /// First N field names (for display).
-    pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1355,7 +1316,7 @@ impl RenderDocInstallation {
             resource: req.resource.clone(),
             max_results: req.max_results,
             data_sample_bytes: req.data_sample_bytes,
-            max_changed_elements: req.max_changed_elements,
+            delta_filter: req.delta_filter.clone(),
         };
 
         std::fs::write(

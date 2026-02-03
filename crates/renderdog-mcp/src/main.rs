@@ -583,9 +583,9 @@ struct FindResourceUsesRequest {
     /// Max bytes to read when comparing data (default 64KB).
     #[serde(default)]
     data_sample_bytes: Option<u32>,
-    /// Max changed buffer elements to report in delta (default 3).
+    /// Filter by delta presence: "all" (default), "with_delta", "without_delta".
     #[serde(default)]
-    max_changed_elements: Option<u32>,
+    delta_filter: Option<String>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
@@ -1550,7 +1550,7 @@ impl RenderdogMcpServer {
                     resource: req.resource,
                     max_results: req.max_results,
                     data_sample_bytes: req.data_sample_bytes,
-                    max_changed_elements: req.max_changed_elements,
+                    delta_filter: req.delta_filter,
                 },
             )
             .map_err(|e| {
@@ -1562,7 +1562,6 @@ impl RenderdogMcpServer {
         tracing::info!(
             tool = "renderdoc_find_resource_uses",
             elapsed_ms = start.elapsed().as_millis(),
-            resource_name = %res.resource_name,
             total_uses = res.total_uses,
             "ok"
         );

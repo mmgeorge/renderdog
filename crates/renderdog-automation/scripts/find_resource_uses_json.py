@@ -6,10 +6,9 @@ and returns details about each use including:
 
   - event_id: The event where the resource is used
   - usage: How the resource is used (e.g., VertexBuffer, ColorTarget, PS_Resource, etc.)
-  - is_write: Whether the resource was modified at this event (see below)
+  - delta: Present when data changed; contains semantic field-level diff for buffers
   - pipeline_name: The name of the pipeline at this event (if applicable)
   - stage: The shader stage (for shader resources)
-  - binding: Binding information (set, binding) if available
   - entry_point: For shaders, the entry point name
 
 Request parameters:
@@ -18,13 +17,12 @@ Request parameters:
   - max_results: Maximum number of uses to return (default 500)
   - data_sample_bytes: Max bytes to read when comparing data (default 64KB).
                        Set to 0 to read entire resource.
-  - max_changed_elements: Max number of changed buffer elements to report (default 3).
+  - delta_filter: Filter results by delta presence: "all" (default), "with_delta", "without_delta"
 
-is_write field:
-  - Compares actual binary data at each event with the previous state
-  - is_write=true only when bytes actually differ from previous read
-  - is_write=null for the first event (no previous state to compare)
-  - For buffers with shader reflection, shows semantic field-level diffs
+delta field:
+  - Only present when actual binary data differs from previous state
+  - For buffers with shader reflection, shows which element changed and semantic field diff
+  - For other resources, shows byte region changes
 
 ResourceUsage values:
   - Unused, VertexBuffer, IndexBuffer
@@ -979,7 +977,6 @@ def get_pipeline_info_at_event(controller, id_to_name, event_id, resource_id, us
         pipe_id = state.GetGraphicsPipelineObject()
         if pipe_id != rd.ResourceId.Null():
             info["pipeline_name"] = get_name(id_to_name, pipe_id)
-            info["pipeline_type"] = "Graphics"
     except Exception:
         pass
 
@@ -988,7 +985,6 @@ def get_pipeline_info_at_event(controller, id_to_name, event_id, resource_id, us
             pipe_id = state.GetComputePipelineObject()
             if pipe_id != rd.ResourceId.Null():
                 info["pipeline_name"] = get_name(id_to_name, pipe_id)
-                info["pipeline_type"] = "Compute"
         except Exception:
             pass
 
@@ -1061,7 +1057,7 @@ def main() -> None:
     resource_query = req["resource"]
     max_results = req.get("max_results", 500)
     data_sample_bytes = req.get("data_sample_bytes") or (64 * 1024)  # 64KB default
-    max_changed_elements = req.get("max_changed_elements") or 3  # How many changed elements to report
+    delta_filter = req.get("delta_filter", "all")  # "all", "with_delta", "without_delta"
 
     rd.InitialiseReplay(rd.GlobalEnvironment(), [])
 
@@ -1110,7 +1106,6 @@ def main() -> None:
 
             # For data change tracking: store the last known data state
             last_data = None
-            last_data_event = None
 
             for usage in usages_list:
                 event_id = int(usage.eventId)
@@ -1127,14 +1122,12 @@ def main() -> None:
                     "usage": usage_str,
                 }
 
-                # Determine is_write by comparing actual data
+                # Determine has_delta by comparing actual data
                 # For read-only usages, skip data comparison
                 if usage_str in ("CopySrc", "ResolveSrc", "Indirect", "VertexBuffer", "IndexBuffer"):
-                    use_entry["is_write"] = False
-                    use_entry["write_check"] = "read_only_usage"
+                    use_entry["has_delta"] = False
                 elif usage_str.endswith("_Constants") or (usage_str.endswith("_Resource") and "RW" not in usage_str):
-                    use_entry["is_write"] = False
-                    use_entry["write_check"] = "read_only_usage"
+                    use_entry["has_delta"] = False
                 else:
                     # For potential write usages, compare actual data
                     controller.SetFrameEvent(event_id, True)  # replay TO this event
@@ -1149,69 +1142,50 @@ def main() -> None:
                             )
                             if is_write_target:
                                 # Could have been written, but we don't know for sure
-                                use_entry["is_write"] = None
-                                use_entry["write_check"] = "first_read_no_baseline"
-                                use_entry["data_size"] = len(current_data)
+                                use_entry["has_delta"] = None
                             else:
-                                use_entry["is_write"] = False
-                                use_entry["write_check"] = "first_read_not_bound"
-                                use_entry["data_size"] = len(current_data)
+                                use_entry["has_delta"] = False
                         else:
                             # Compare with previous data
                             if current_data != last_data:
-                                use_entry["is_write"] = True
-                                use_entry["write_check"] = "data_changed"
-                                use_entry["previous_event_id"] = last_data_event
-                                use_entry["data_size"] = len(current_data)
+                                use_entry["has_delta"] = True
 
-                                # Compute delta showing which elements changed
+                                # Compute delta showing first changed element
                                 if buffer_fields and buffer_stride:
-                                    # Use semantic diff with element indices
+                                    # Use semantic diff - get first changed element only
                                     changed_elements = find_changed_buffer_elements(
                                         buffer_fields, buffer_stride,
                                         last_data, current_data,
-                                        max_elements=max_changed_elements
+                                        max_elements=1
                                     )
                                     if changed_elements:
-                                        num_elements = len(current_data) // buffer_stride
+                                        # Return just the first changed element directly
+                                        first_change = changed_elements[0]
                                         use_entry["delta"] = {
-                                            "type": "buffer_elements",
-                                            "total_elements": num_elements,
-                                            "changed": changed_elements,
+                                            "element": first_change["element"],
+                                            "fields": first_change["delta"],
                                         }
                                     else:
-                                        # Changed but couldn't parse elements - show byte regions
-                                        byte_regions = find_changed_bytes_region(last_data, current_data)
+                                        # Changed but couldn't parse elements - show first byte region
+                                        byte_regions = find_changed_bytes_region(last_data, current_data, max_regions=1)
                                         if byte_regions:
-                                            use_entry["delta"] = {
-                                                "type": "byte_regions",
-                                                "changed": byte_regions,
-                                            }
+                                            use_entry["delta"] = byte_regions[0]
                                 else:
-                                    # No buffer layout - show byte regions
-                                    byte_regions = find_changed_bytes_region(last_data, current_data)
+                                    # No buffer layout - show first byte region
+                                    byte_regions = find_changed_bytes_region(last_data, current_data, max_regions=1)
                                     if byte_regions:
-                                        use_entry["delta"] = {
-                                            "type": "byte_regions",
-                                            "total_bytes": len(current_data),
-                                            "changed": byte_regions,
-                                        }
+                                        use_entry["delta"] = byte_regions[0]
                             else:
-                                use_entry["is_write"] = False
-                                use_entry["write_check"] = "data_unchanged"
-                                use_entry["data_size"] = len(current_data)
+                                use_entry["has_delta"] = False
 
                         last_data = current_data
-                        last_data_event = event_id
                     else:
                         # Couldn't read data - fall back to binding check
-                        use_entry["write_check"] = "data_read_failed"
-                        use_entry["read_error"] = read_error
                         is_write_target = is_bound_as_write_target(
                             controller, resource_desc.resourceId, event_id
                         )
                         if is_write_target is not None:
-                            use_entry["is_write"] = is_write_target
+                            use_entry["has_delta"] = is_write_target
 
                 # Add view info if available
                 if usage.view != rd.ResourceId.Null():
@@ -1227,6 +1201,13 @@ def main() -> None:
                 except Exception:
                     pass
 
+                # Apply delta filter
+                entry_has_delta = use_entry.get("has_delta") == True
+                if delta_filter == "with_delta" and not entry_has_delta:
+                    continue
+                if delta_filter == "without_delta" and entry_has_delta:
+                    continue
+
                 uses.append(use_entry)
 
                 if max_results and len(uses) >= max_results:
@@ -1234,23 +1215,10 @@ def main() -> None:
 
             # Build result
             document = {
-                "capture_path": req["capture_path"],
-                "resource_query": resource_query,
-                "resource_id": resource_id,
-                "resource_name": resource_name,
-                "resource_type": resource_type,
                 "total_uses": len(uses),
                 "truncated": max_results and len(uses) >= max_results,
                 "uses": uses,
             }
-
-            # Add buffer layout info if available
-            if buffer_fields and buffer_stride:
-                document["buffer_layout"] = {
-                    "stride": buffer_stride,
-                    "field_count": len(buffer_fields),
-                    "fields": [f.name for f in buffer_fields[:20]],  # First 20 field names
-                }
 
             write_envelope(True, result=document)
         finally:
