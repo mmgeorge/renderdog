@@ -496,6 +496,84 @@ struct FindEventsRequest {
     max_results: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetEventsRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetShaderInfoRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    pipeline_name: String,
+    #[serde(default = "default_entry_point")]
+    entry_point: String,
+}
+
+fn default_entry_point() -> String {
+    "main".to_string()
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetBufferChangesDeltaRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    buffer_name: String,
+    #[serde(default = "default_tracked_indices")]
+    tracked_indices: Vec<u32>,
+}
+
+fn default_tracked_indices() -> Vec<u32> {
+    vec![0]
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetEventPipelineStateRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    event_id: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetResourceChangedEventIdsRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    resource_name: String,
+}
+
+fn default_max_search_results() -> Option<u32> {
+    Some(500)
+}
+
+fn default_regex_mode() -> bool {
+    true
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SearchResourcesRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    /// Regex pattern to match resource names. Examples: "particle", "^Texture", "shadow|light", "gbuffer_\\d+"
+    query: String,
+    /// If true (default), treat query as regex. If false, treat as literal string.
+    #[serde(default = "default_regex_mode")]
+    regex: bool,
+    #[serde(default)]
+    case_sensitive: bool,
+    #[serde(default = "default_max_search_results")]
+    max_results: Option<u32>,
+    /// Filter by resource types. Valid: Unknown, Device, Queue, CommandBuffer, Texture, Buffer, View, Sampler, SwapchainImage, Memory, Shader, ShaderBinding, PipelineState, StateObject, RenderPass, Query, Sync, Pool, AccelerationStructure, DescriptorStore
+    #[serde(default)]
+    resource_types: Option<Vec<String>>,
+}
+
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 enum FindEventSelection {
@@ -1125,6 +1203,302 @@ impl RenderdogMcpServer {
             tool = "renderdoc_find_events",
             elapsed_ms = start.elapsed().as_millis(),
             matches = res.matches.len(),
+            truncated = res.truncated,
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_events",
+        description = "Get all events from a .rdc capture with their event IDs, marker scopes, and API call names. Returns a complete event map useful for understanding the capture structure."
+    )]
+    async fn get_events(
+        &self,
+        Parameters(req): Parameters<GetEventsRequest>,
+    ) -> Result<Json<renderdog::GetEventsResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_events",
+            capture_path = %req.capture_path,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_events", "failed");
+            tracing::debug!(tool = "renderdoc_get_events", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_events(
+                &cwd,
+                &renderdog::GetEventsRequest {
+                    capture_path: req.capture_path,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_events", "failed");
+                tracing::debug!(tool = "renderdoc_get_events", err = %e, "details");
+                format!("get events failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_events",
+            elapsed_ms = start.elapsed().as_millis(),
+            total_events = res.total_events,
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_shader_info",
+        description = "Get detailed shader information (source files, resources, constant blocks, samplers, input signature) for a specific pipeline and entry point in a .rdc capture."
+    )]
+    async fn get_shader_info(
+        &self,
+        Parameters(req): Parameters<GetShaderInfoRequest>,
+    ) -> Result<Json<renderdog::GetShaderInfoResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_shader_info",
+            capture_path = %req.capture_path,
+            pipeline_name = %req.pipeline_name,
+            entry_point = %req.entry_point,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_shader_info", "failed");
+            tracing::debug!(tool = "renderdoc_get_shader_info", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_shader_info(
+                &cwd,
+                &renderdog::GetShaderInfoRequest {
+                    capture_path: req.capture_path,
+                    pipeline_name: req.pipeline_name,
+                    entry_point: req.entry_point,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_shader_info", "failed");
+                tracing::debug!(tool = "renderdoc_get_shader_info", err = %e, "details");
+                format!("get shader info failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_shader_info",
+            elapsed_ms = start.elapsed().as_millis(),
+            stage = %res.stage,
+            source_files = res.source_files.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_buffer_changes_delta",
+        description = "Track GPU buffer changes across a frame. Automatically infers struct layout from shader reflection, reads data at specified element indices at every action, and returns delta-encoded changes (only values that actually changed)."
+    )]
+    async fn get_buffer_changes_delta(
+        &self,
+        Parameters(req): Parameters<GetBufferChangesDeltaRequest>,
+    ) -> Result<Json<renderdog::GetBufferChangesDeltaResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_buffer_changes_delta",
+            capture_path = %req.capture_path,
+            buffer_name = %req.buffer_name,
+            tracked_indices = ?req.tracked_indices,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_buffer_changes_delta", "failed");
+            tracing::debug!(tool = "renderdoc_get_buffer_changes_delta", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_buffer_changes_delta(
+                &cwd,
+                &renderdog::GetBufferChangesDeltaRequest {
+                    capture_path: req.capture_path,
+                    buffer_name: req.buffer_name,
+                    tracked_indices: req.tracked_indices,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_buffer_changes_delta", "failed");
+                tracing::debug!(tool = "renderdoc_get_buffer_changes_delta", err = %e, "details");
+                format!("get buffer changes delta failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_buffer_changes_delta",
+            elapsed_ms = start.elapsed().as_millis(),
+            total_changes = res.total_changes,
+            elements = res.elements.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_event_pipeline_state",
+        description = "Get complete pipeline state at a specific event ID: active shader stages, all resource bindings (buffers, textures), uniform/constant buffer contents, samplers, and for graphics pipelines: vertex/index buffers, render targets, depth/stencil/blend state."
+    )]
+    async fn get_event_pipeline_state(
+        &self,
+        Parameters(req): Parameters<GetEventPipelineStateRequest>,
+    ) -> Result<Json<renderdog::GetEventPipelineStateResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_event_pipeline_state",
+            capture_path = %req.capture_path,
+            event_id = req.event_id,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_event_pipeline_state", "failed");
+            tracing::debug!(tool = "renderdoc_get_event_pipeline_state", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_event_pipeline_state(
+                &cwd,
+                &renderdog::GetEventPipelineStateRequest {
+                    capture_path: req.capture_path,
+                    event_id: req.event_id,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_event_pipeline_state", "failed");
+                tracing::debug!(tool = "renderdoc_get_event_pipeline_state", err = %e, "details");
+                format!("get event pipeline state failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_event_pipeline_state",
+            elapsed_ms = start.elapsed().as_millis(),
+            pipeline = %res.pipeline,
+            stages = res.stages.len(),
+            resources = res.resources.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_resource_changed_event_ids",
+        description = "Find all events that modify a resource (texture or buffer). Scans all actions and detects writes from render targets, depth/stencil outputs, clears, copies, and RW shader bindings."
+    )]
+    async fn get_resource_changed_event_ids(
+        &self,
+        Parameters(req): Parameters<GetResourceChangedEventIdsRequest>,
+    ) -> Result<Json<renderdog::GetResourceChangedEventIdsResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_resource_changed_event_ids",
+            capture_path = %req.capture_path,
+            resource_name = %req.resource_name,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_resource_changed_event_ids", "failed");
+            tracing::debug!(tool = "renderdoc_get_resource_changed_event_ids", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_resource_changed_event_ids(
+                &cwd,
+                &renderdog::GetResourceChangedEventIdsRequest {
+                    capture_path: req.capture_path,
+                    resource_name: req.resource_name,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_resource_changed_event_ids", "failed");
+                tracing::debug!(tool = "renderdoc_get_resource_changed_event_ids", err = %e, "details");
+                format!("get resource changed event ids failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_resource_changed_event_ids",
+            elapsed_ms = start.elapsed().as_millis(),
+            resource_name = %res.resource_name,
+            write_count = res.write_count,
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_search_resources",
+        description = "Search for resources by regex pattern in a .rdc capture. Returns matching resource IDs, names, and types.\n\nRegex examples:\n- \"particle\" - contains 'particle'\n- \"^Texture\" - starts with 'Texture'\n- \"shadow|light\" - contains 'shadow' or 'light'\n- \"gbuffer_\\\\d+\" - matches 'gbuffer_0', 'gbuffer_1', etc.\n\nValid resource_types filter values: Unknown, Device, Queue, CommandBuffer, Texture, Buffer, View, Sampler, SwapchainImage, Memory, Shader, ShaderBinding, PipelineState, StateObject, RenderPass, Query, Sync, Pool, AccelerationStructure, DescriptorStore"
+    )]
+    async fn search_resources(
+        &self,
+        Parameters(req): Parameters<SearchResourcesRequest>,
+    ) -> Result<Json<renderdog::SearchResourcesResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_search_resources",
+            capture_path = %req.capture_path,
+            query = %req.query,
+            regex = req.regex,
+            case_sensitive = req.case_sensitive,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_search_resources", "failed");
+            tracing::debug!(tool = "renderdoc_search_resources", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .search_resources(
+                &cwd,
+                &renderdog::SearchResourcesRequest {
+                    capture_path: req.capture_path,
+                    query: req.query,
+                    regex: req.regex,
+                    case_sensitive: req.case_sensitive,
+                    max_results: req.max_results,
+                    resource_types: req.resource_types,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_search_resources", "failed");
+                tracing::debug!(tool = "renderdoc_search_resources", err = %e, "details");
+                format!("search resources failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_search_resources",
+            elapsed_ms = start.elapsed().as_millis(),
+            total_matches = res.total_matches,
             truncated = res.truncated,
             "ok"
         );

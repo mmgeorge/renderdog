@@ -124,9 +124,15 @@ pub fn default_exports_dir(cwd: &Path) -> PathBuf {
 }
 
 pub(crate) fn resolve_path_from_cwd(cwd: &Path, value: &str) -> PathBuf {
-    if value.trim().is_empty() {
+    let value = value.trim();
+    if value.is_empty() {
         return cwd.to_path_buf();
     }
+    // Strip surrounding quotes (common when paths are copied from terminals)
+    let value = value
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(value);
     let p = PathBuf::from(value);
     if p.is_absolute() { p } else { cwd.join(p) }
 }
