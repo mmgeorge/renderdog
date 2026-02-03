@@ -587,6 +587,13 @@ struct FindResourceUsesRequest {
     /// Include pipeline info at each event (slower but more detailed). Default true.
     #[serde(default = "default_include_pipeline_info")]
     include_pipeline_info: bool,
+    /// If true, compare actual binary data to detect writes. If false (default), use binding heuristics.
+    /// When true, is_write will only be true if bytes actually changed (slower but more accurate).
+    #[serde(default)]
+    check_data_changed: bool,
+    /// Max bytes to read when comparing data (default 64KB). Only used when check_data_changed=true.
+    #[serde(default)]
+    data_sample_bytes: Option<u32>,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, JsonSchema)]
@@ -1521,7 +1528,7 @@ impl RenderdogMcpServer {
 
     #[tool(
         name = "renderdoc_find_resource_uses",
-        description = "Find all uses of a resource in a .rdc capture. Returns event IDs, usage types (VertexBuffer, ColorTarget, PS_Resource, CS_RWResource, etc.), and optionally pipeline/binding info.\n\nUsage types include: VertexBuffer, IndexBuffer, VS/PS/CS_Constants (uniform buffers), VS/PS/CS_Resource (textures/samplers), VS/PS/CS_RWResource (storage buffers/images), ColorTarget, DepthStencilTarget, InputTarget, Indirect, Clear, Copy, CopySrc, CopyDst, etc."
+        description = "Find all uses of a resource in a .rdc capture. Returns event IDs, usage types, and whether each event modified the resource.\n\nUsage types: VertexBuffer, IndexBuffer, VS/PS/CS_Constants (uniform buffers), VS/PS/CS_Resource (textures/samplers), VS/PS/CS_RWResource (storage buffers/images), ColorTarget, DepthStencilTarget, InputTarget, Indirect, Clear, Copy, CopySrc, CopyDst, etc.\n\nThe is_write field indicates if the resource was modified. By default uses binding heuristics (fast). Set check_data_changed=true to compare actual binary data (slower but detects real changes)."
     )]
     async fn find_resource_uses(
         &self,
@@ -1533,6 +1540,7 @@ impl RenderdogMcpServer {
             capture_path = %req.capture_path,
             resource = %req.resource,
             include_pipeline_info = req.include_pipeline_info,
+            check_data_changed = req.check_data_changed,
             "start"
         );
 
@@ -1552,6 +1560,8 @@ impl RenderdogMcpServer {
                     resource: req.resource,
                     max_results: req.max_results,
                     include_pipeline_info: req.include_pipeline_info,
+                    check_data_changed: req.check_data_changed,
+                    data_sample_bytes: req.data_sample_bytes,
                 },
             )
             .map_err(|e| {
