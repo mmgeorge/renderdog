@@ -1,30 +1,25 @@
 """
-get_buffer_changes_delta_json.py -- RenderDoc Python script for tracking GPU buffer changes.
+get_buffer_details_json.py -- RenderDoc Python script for getting buffer metadata.
 
-Finds a buffer by name, automatically infers the struct layout from the shader that
-references the buffer, reads struct-formatted data at specified element indices at
-every action in the frame, and returns only the snapshots where a value actually changed.
-
-Uses delta encoding: initial_state is the full state, changes contain only diffs.
+Finds a buffer by name, infers the struct layout from shader reflection,
+and returns schema, stride, and usage information.
 
 Returns:
-  - tracked_indices: The element indices that were tracked
-  - total_changes: Total number of changes detected
-  - elements: Array of {buffer_index, initial_event_id, initial_state, changes}
-
-Use get_buffer_details for schema, stride, and usage information.
+  - buffer_name: The name of the buffer
+  - schema: Type description of the buffer struct fields
+  - stride: Byte stride per element
+  - usages: List of pipelines/bindings that use this buffer
 """
 
 import struct
 import json
-import re
 import traceback
 
 import renderdoc as rd
 
 
-REQ_PATH = "get_buffer_changes_delta_json.request.json"
-RESP_PATH = "get_buffer_changes_delta_json.response.json"
+REQ_PATH = "get_buffer_details_json.request.json"
+RESP_PATH = "get_buffer_details_json.response.json"
 
 
 def write_envelope(ok: bool, result=None, error: str = None) -> None:
@@ -282,155 +277,7 @@ def extract_fields_from_resource(shader_res):
 
 
 # ---------------------------------------------------------------------------
-# Structured JSON reconstruction from flat field paths
-# ---------------------------------------------------------------------------
-
-PATH_TOKEN_RE = re.compile(
-    r'([A-Za-z_]\w*)'
-    r'|\[(\d+)\]'
-)
-
-
-def parse_field_path(name):
-    """Parse a flat field name into a list of path steps."""
-    steps = []
-    for part in name.split('.'):
-        tokens = PATH_TOKEN_RE.findall(part)
-        for tok_name, tok_idx in tokens:
-            if tok_name:
-                steps.append((tok_name, None))
-            else:
-                steps.append((None, int(tok_idx)))
-    return steps
-
-
-def build_nested(fields, values):
-    """Given a list of FieldDef and values, reconstruct a nested dict/list structure."""
-    root = {}
-
-    for field, val in zip(fields, values):
-        steps = parse_field_path(field.name)
-        insert_at_path(root, steps, val)
-
-    clean(root)
-    return root
-
-
-def insert_at_path(node, steps, value):
-    """Walk/create the nested structure described by steps, set the leaf to value."""
-    for i, (key, idx) in enumerate(steps):
-        is_last = (i == len(steps) - 1)
-
-        if key is not None and idx is None:
-            if is_last:
-                node[key] = value
-            else:
-                next_key, next_idx = steps[i + 1]
-                if next_key is None and next_idx is not None:
-                    if key not in node:
-                        node[key] = []
-                    node = node[key]
-                else:
-                    if key not in node:
-                        node[key] = {}
-                    node = node[key]
-
-        elif key is not None and idx is not None:
-            if key not in node:
-                node[key] = []
-            lst = node[key]
-            while len(lst) <= idx:
-                lst.append(None)
-
-            if is_last:
-                lst[idx] = value
-            else:
-                next_key, next_idx = steps[i + 1]
-                if next_key is None and next_idx is not None:
-                    if lst[idx] is None:
-                        lst[idx] = []
-                    node = lst[idx]
-                else:
-                    if lst[idx] is None:
-                        lst[idx] = {}
-                    node = lst[idx]
-
-        elif key is None and idx is not None:
-            if not isinstance(node, list):
-                break
-            while len(node) <= idx:
-                node.append(None)
-
-            if is_last:
-                node[idx] = value
-            else:
-                next_key, next_idx = steps[i + 1]
-                if next_key is None and next_idx is not None:
-                    if node[idx] is None:
-                        node[idx] = []
-                    node = node[idx]
-                else:
-                    if node[idx] is None:
-                        node[idx] = {}
-                    node = node[idx]
-
-
-def clean(obj):
-    """Replace any remaining None holes with 0 and recurse."""
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if v is None:
-                obj[k] = 0
-            else:
-                clean(v)
-    elif isinstance(obj, list):
-        for i in range(len(obj)):
-            if obj[i] is None:
-                obj[i] = 0
-            else:
-                clean(obj[i])
-
-
-# ---------------------------------------------------------------------------
-# Recursive diff for nested structures
-# ---------------------------------------------------------------------------
-
-def diff_nested(old, new):
-    """Recursively compare two nested structures and return a sparse patch."""
-    if type(old) != type(new):
-        return new
-
-    if isinstance(old, dict):
-        patch = {}
-        all_keys = set(old.keys()) | set(new.keys())
-        for k in all_keys:
-            if k not in old:
-                patch[k] = new[k]
-            elif k not in new:
-                patch[k] = None
-            else:
-                sub = diff_nested(old[k], new[k])
-                if sub is not None:
-                    patch[k] = sub
-        return patch if patch else None
-
-    if isinstance(old, list):
-        if len(old) != len(new):
-            return new
-        patch = {}
-        for i in range(len(old)):
-            sub = diff_nested(old[i], new[i])
-            if sub is not None:
-                patch[str(i)] = sub
-        return patch if patch else None
-
-    if old != new:
-        return new
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Buffer finding and reading
+# Buffer finding
 # ---------------------------------------------------------------------------
 
 def find_buffer(controller, buffer_name):
@@ -450,22 +297,6 @@ def find_buffer(controller, buffer_name):
     )
 
 
-def read_elements(controller, buf_id, indices, fields, stride):
-    """Read tracked element indices from the buffer at the current replay state."""
-    result = {}
-    for idx in indices:
-        base = idx * stride
-        raw = controller.GetBufferData(buf_id, base, stride)
-        if len(raw) < stride:
-            continue
-        vals = []
-        for f in fields:
-            val = struct.unpack_from(f.struct_char, raw, f.byte_offset)
-            vals.append(val[0])
-        result[idx] = tuple(vals)
-    return result
-
-
 def flatten_actions(roots):
     """Yield every leaf action in linear order."""
     for action in roots:
@@ -473,6 +304,134 @@ def flatten_actions(roots):
             yield from flatten_actions(action.children)
         else:
             yield action
+
+
+# ---------------------------------------------------------------------------
+# Buffer usage collection
+# ---------------------------------------------------------------------------
+
+def collect_buffer_usages(controller, buf_id, actions):
+    """Scan every leaf action and record each time the buffer appears in a shader binding."""
+    stages = [
+        rd.ShaderStage.Compute,
+        rd.ShaderStage.Vertex,
+        rd.ShaderStage.Fragment,
+        rd.ShaderStage.Geometry,
+        rd.ShaderStage.Tess_Eval,
+        rd.ShaderStage.Tess_Control,
+    ]
+
+    def get_name(rid):
+        try:
+            for r in controller.GetResources():
+                if r.resourceId == rid:
+                    return r.name
+        except Exception:
+            pass
+        return str(rid)
+
+    def binding_type_str(refl_res, is_rw):
+        try:
+            vtype = refl_res.variableType
+            is_buffer = (vtype.rows == 0 and vtype.columns == 0) or len(vtype.members) > 0
+        except Exception:
+            is_buffer = True
+        prefix = "RW " if is_rw else ""
+        return prefix + "Buffer" if is_buffer else prefix + "Resource"
+
+    groups = {}
+
+    for action in actions:
+        eid = action.eventId
+        controller.SetFrameEvent(eid, False)
+        state = controller.GetPipelineState()
+
+        try:
+            pipe_id = state.GetGraphicsPipelineObject()
+        except Exception:
+            pipe_id = rd.ResourceId.Null()
+
+        if pipe_id == rd.ResourceId.Null():
+            for s in stages:
+                try:
+                    r = state.GetShaderReflection(s)
+                    if r is not None:
+                        pipe_id = r.resourceId
+                        break
+                except Exception:
+                    continue
+
+        for stage in stages:
+            refl = state.GetShaderReflection(stage)
+            if refl is None:
+                continue
+
+            rw_list = state.GetReadWriteResources(stage)
+            for i, used in enumerate(rw_list):
+                if used.descriptor.resource == buf_id:
+                    record_usage(groups, eid, pipe_id, used, refl, i, True,
+                                refl.readWriteResources, get_name, binding_type_str)
+
+            ro_list = state.GetReadOnlyResources(stage)
+            for i, used in enumerate(ro_list):
+                if used.descriptor.resource == buf_id:
+                    record_usage(groups, eid, pipe_id, used, refl, i, False,
+                                refl.readOnlyResources, get_name, binding_type_str)
+
+    result = []
+    for key, g in sorted(groups.items(), key=lambda kv: kv[1]["event_ids"][0]):
+        result.append({
+            "pipeline": g["pipeline"],
+            "descriptor_set": g["descriptor_set"],
+            "binding": {
+                "index": g["binding_index"],
+                "name": g["binding_name"],
+                "type": g["type_str"],
+            },
+            "event_ids": g["event_ids"],
+        })
+
+    return result
+
+
+def record_usage(groups, eid, pipe_id, used, refl, refl_idx, is_rw,
+                 refl_list, get_name, binding_type_str):
+    """Record a single buffer usage into the groups accumulator."""
+    try:
+        ds_id = used.access.descriptorStore
+    except Exception:
+        ds_id = rd.ResourceId.Null()
+
+    bname = ""
+    bindex = refl_idx
+    refl_res = None
+    if refl_idx < len(refl_list):
+        refl_res = refl_list[refl_idx]
+        bname = refl_res.name
+        try:
+            bindex = refl_res.fixedBindNumber
+        except Exception:
+            bindex = refl_idx
+
+    type_str = binding_type_str(refl_res, is_rw) if refl_res else ("RW Buffer" if is_rw else "Buffer")
+
+    pipe_name = get_name(pipe_id) if pipe_id != rd.ResourceId.Null() else ""
+    ds_name = get_name(ds_id) if ds_id != rd.ResourceId.Null() else ""
+    key = (pipe_name, ds_name, bindex, is_rw)
+
+    if key not in groups:
+        groups[key] = {
+            "pipeline": pipe_name,
+            "descriptor_set": ds_name,
+            "binding_name": bname,
+            "binding_index": bindex,
+            "type_str": type_str,
+            "event_ids": [],
+        }
+
+    eids = groups[key]["event_ids"]
+    if not eids or eids[-1] != eid:
+        eids.append(eid)
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +443,6 @@ def main() -> None:
         req = json.load(f)
 
     buffer_name = req["buffer_name"]
-    tracked_indices = req.get("tracked_indices", [0])
 
     rd.InitialiseReplay(rd.GlobalEnvironment(), [])
 
@@ -505,65 +463,22 @@ def main() -> None:
             buf_id = find_buffer(controller, buffer_name)
 
             # Infer struct layout from shader reflection
-            fields, stride, _schema = infer_layout_from_reflection(controller, buf_id)
+            fields, stride, schema = infer_layout_from_reflection(controller, buf_id)
 
             # Scan all actions
             actions = list(flatten_actions(controller.GetRootActions()))
             if not actions:
                 raise RuntimeError("No actions found in capture")
 
-            # Track data changes
-            element_initial = {}
-            element_changes = {idx: [] for idx in tracked_indices}
-            last_nested = {}
-            last_seen = {}
-            total_changes = 0
-
-            for action in actions:
-                eid = action.eventId
-                controller.SetFrameEvent(eid, False)
-                current = read_elements(controller, buf_id, tracked_indices, fields, stride)
-
-                for idx in tracked_indices:
-                    vals = current.get(idx)
-                    if vals is None:
-                        continue
-                    prev = last_seen.get(idx)
-                    if prev is None or vals != prev:
-                        nested = build_nested(fields, vals)
-
-                        if idx not in element_initial:
-                            element_initial[idx] = (eid, nested)
-                        else:
-                            delta = diff_nested(last_nested[idx], nested)
-                            if delta is not None:
-                                element_changes[idx].append({
-                                    "event_id": eid,
-                                    "delta": delta,
-                                })
-                                total_changes += 1
-
-                        last_nested[idx] = nested
-                        last_seen[idx] = vals
-
-            # Build elements array
-            elements = []
-            for idx in tracked_indices:
-                if idx not in element_initial:
-                    continue
-                init_eid, init_state = element_initial[idx]
-                elements.append({
-                    "buffer_index": idx,
-                    "initial_event_id": init_eid,
-                    "initial_state": init_state,
-                    "changes": element_changes[idx],
-                })
+            # Collect buffer usage across all actions
+            usages = collect_buffer_usages(controller, buf_id, actions)
 
             # Build final document
             document = {
-                "tracked_indices": list(tracked_indices),
-                "total_changes": total_changes,
-                "elements": elements,
+                "buffer_name": buffer_name,
+                "schema": schema,
+                "stride": stride,
+                "usages": usages,
             }
 
             write_envelope(True, result=document)

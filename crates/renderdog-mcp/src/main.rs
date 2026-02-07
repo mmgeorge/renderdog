@@ -504,7 +504,7 @@ struct GetEventsRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct GetShaderInfoRequest {
+struct GetShaderDetailsRequest {
     #[serde(default)]
     cwd: Option<String>,
     capture_path: String,
@@ -512,6 +512,22 @@ struct GetShaderInfoRequest {
     /// Optional list of entry points to filter by. If not provided, returns all entry points found in the pipeline.
     #[serde(default)]
     entry_points: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetBufferDetailsRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    buffer_name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetTextureDetailsRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    texture_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -526,6 +542,50 @@ struct GetBufferChangesDeltaRequest {
 
 fn default_tracked_indices() -> Vec<u32> {
     vec![0]
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+struct TexelCoord {
+    x: u32,
+    y: u32,
+    #[serde(default)]
+    z: u32,
+    #[serde(default)]
+    mip: u32,
+    #[serde(default)]
+    slice: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetTextureChangesDeltaRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    texture_name: String,
+    #[serde(default = "default_tracked_texels")]
+    tracked_texels: Vec<TexelCoord>,
+}
+
+fn default_tracked_texels() -> Vec<TexelCoord> {
+    vec![TexelCoord { x: 0, y: 0, z: 0, mip: 0, slice: 0 }]
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetPipelineDetailsRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    /// Name of the pipeline to inspect.
+    pipeline_name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetPipelineBindingChangesDeltaRequest {
+    #[serde(default)]
+    cwd: Option<String>,
+    capture_path: String,
+    /// Name of the pipeline to track.
+    pipeline_name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -548,20 +608,14 @@ fn default_max_search_results() -> Option<u32> {
     Some(500)
 }
 
-fn default_regex_mode() -> bool {
-    true
-}
-
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SearchResourcesRequest {
     #[serde(default)]
     cwd: Option<String>,
     capture_path: String,
-    /// Regex pattern to match resource names. Examples: "particle", "^Texture", "shadow|light", "gbuffer_\\d+"
-    query: String,
-    /// If true (default), treat query as regex. If false, treat as literal string.
-    #[serde(default = "default_regex_mode")]
-    regex: bool,
+    /// Optional regex pattern to match resource names. If not provided, returns all resources (filtered only by resource_types if specified). Examples: "particle", "^Texture", "shadow|light", "gbuffer_\\d+"
+    #[serde(default)]
+    query: Option<String>,
     #[serde(default)]
     case_sensitive: bool,
     #[serde(default = "default_max_search_results")]
@@ -1269,16 +1323,16 @@ impl RenderdogMcpServer {
     }
 
     #[tool(
-        name = "renderdoc_get_shader_info",
+        name = "renderdoc_get_shader_details",
         description = "Get detailed shader information (source files, resources, constant blocks, samplers, input signature) for a pipeline in a .rdc capture. Returns an array of shader info for all entry points, or filtered by the optional entry_points parameter."
     )]
-    async fn get_shader_info(
+    async fn get_shader_details(
         &self,
-        Parameters(req): Parameters<GetShaderInfoRequest>,
-    ) -> Result<Json<renderdog::GetShaderInfoResponse>, String> {
+        Parameters(req): Parameters<GetShaderDetailsRequest>,
+    ) -> Result<Json<renderdog::GetShaderDetailsResponse>, String> {
         let start = Instant::now();
         tracing::info!(
-            tool = "renderdoc_get_shader_info",
+            tool = "renderdoc_get_shader_details",
             capture_path = %req.capture_path,
             pipeline_name = %req.pipeline_name,
             entry_points = ?req.entry_points,
@@ -1286,30 +1340,30 @@ impl RenderdogMcpServer {
         );
 
         let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
-            tracing::error!(tool = "renderdoc_get_shader_info", "failed");
-            tracing::debug!(tool = "renderdoc_get_shader_info", err = %e, "details");
+            tracing::error!(tool = "renderdoc_get_shader_details", "failed");
+            tracing::debug!(tool = "renderdoc_get_shader_details", err = %e, "details");
             format!("detect installation failed: {e}")
         })?;
 
         let cwd = resolve_base_cwd(req.cwd.clone())?;
 
         let res = install
-            .get_shader_info(
+            .get_shader_details(
                 &cwd,
-                &renderdog::GetShaderInfoRequest {
+                &renderdog::GetShaderDetailsRequest {
                     capture_path: req.capture_path,
                     pipeline_name: req.pipeline_name,
                     entry_points: req.entry_points,
                 },
             )
             .map_err(|e| {
-                tracing::error!(tool = "renderdoc_get_shader_info", "failed");
-                tracing::debug!(tool = "renderdoc_get_shader_info", err = %e, "details");
-                format!("get shader info failed: {e}")
+                tracing::error!(tool = "renderdoc_get_shader_details", "failed");
+                tracing::debug!(tool = "renderdoc_get_shader_details", err = %e, "details");
+                format!("get shader details failed: {e}")
             })?;
 
         tracing::info!(
-            tool = "renderdoc_get_shader_info",
+            tool = "renderdoc_get_shader_details",
             elapsed_ms = start.elapsed().as_millis(),
             shaders_count = res.shaders.len(),
             "ok"
@@ -1318,8 +1372,106 @@ impl RenderdogMcpServer {
     }
 
     #[tool(
+        name = "renderdoc_get_buffer_details",
+        description = "Get metadata for a GPU buffer: infers struct schema from shader reflection, stride per element, and all pipeline/binding usages across the frame. Use this before get_buffer_changes_delta to understand the buffer structure."
+    )]
+    async fn get_buffer_details(
+        &self,
+        Parameters(req): Parameters<GetBufferDetailsRequest>,
+    ) -> Result<Json<renderdog::GetBufferDetailsResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_buffer_details",
+            capture_path = %req.capture_path,
+            buffer_name = %req.buffer_name,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_buffer_details", "failed");
+            tracing::debug!(tool = "renderdoc_get_buffer_details", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_buffer_details(
+                &cwd,
+                &renderdog::GetBufferDetailsRequest {
+                    capture_path: req.capture_path,
+                    buffer_name: req.buffer_name,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_buffer_details", "failed");
+                tracing::debug!(tool = "renderdoc_get_buffer_details", err = %e, "details");
+                format!("get buffer details failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_buffer_details",
+            elapsed_ms = start.elapsed().as_millis(),
+            stride = res.stride,
+            usages = res.usages.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_texture_details",
+        description = "Get metadata for a GPU texture: format, dimensions, mip levels, array size, sample count, and all pipeline/binding usages across the frame including render target bindings."
+    )]
+    async fn get_texture_details(
+        &self,
+        Parameters(req): Parameters<GetTextureDetailsRequest>,
+    ) -> Result<Json<renderdog::GetTextureDetailsResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_texture_details",
+            capture_path = %req.capture_path,
+            texture_name = %req.texture_name,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_texture_details", "failed");
+            tracing::debug!(tool = "renderdoc_get_texture_details", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_texture_details(
+                &cwd,
+                &renderdog::GetTextureDetailsRequest {
+                    capture_path: req.capture_path,
+                    texture_name: req.texture_name,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_texture_details", "failed");
+                tracing::debug!(tool = "renderdoc_get_texture_details", err = %e, "details");
+                format!("get texture details failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_texture_details",
+            elapsed_ms = start.elapsed().as_millis(),
+            format = %res.format,
+            width = res.width,
+            height = res.height,
+            usages = res.usages.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
         name = "renderdoc_get_buffer_changes_delta",
-        description = "Track GPU buffer changes across a frame. Automatically infers struct layout from shader reflection, reads data at specified element indices at every action, and returns delta-encoded changes (only values that actually changed)."
+        description = "Track GPU buffer element changes across a frame. Reads data at specified element indices at every action and returns delta-encoded changes: initial_state for each element plus only the deltas where values actually changed."
     )]
     async fn get_buffer_changes_delta(
         &self,
@@ -1362,6 +1514,162 @@ impl RenderdogMcpServer {
             elapsed_ms = start.elapsed().as_millis(),
             total_changes = res.total_changes,
             elements = res.elements.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_texture_changes_delta",
+        description = "Track GPU texture texel changes across a frame. Reads texel values at specified coordinates (x, y, z, mip, slice) at every action and returns delta-encoded changes: initial_state for each texel plus only the channel deltas where values actually changed."
+    )]
+    async fn get_texture_changes_delta(
+        &self,
+        Parameters(req): Parameters<GetTextureChangesDeltaRequest>,
+    ) -> Result<Json<renderdog::GetTextureChangesDeltaResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_texture_changes_delta",
+            capture_path = %req.capture_path,
+            texture_name = %req.texture_name,
+            tracked_texels = req.tracked_texels.len(),
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_texture_changes_delta", "failed");
+            tracing::debug!(tool = "renderdoc_get_texture_changes_delta", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_texture_changes_delta(
+                &cwd,
+                &renderdog::GetTextureChangesDeltaRequest {
+                    capture_path: req.capture_path,
+                    texture_name: req.texture_name,
+                    tracked_texels: req.tracked_texels.iter().map(|t| {
+                        renderdog::TexelCoord {
+                            x: t.x,
+                            y: t.y,
+                            z: t.z,
+                            mip: t.mip,
+                            slice: t.slice,
+                        }
+                    }).collect(),
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_texture_changes_delta", "failed");
+                tracing::debug!(tool = "renderdoc_get_texture_changes_delta", err = %e, "details");
+                format!("get texture changes delta failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_texture_changes_delta",
+            elapsed_ms = start.elapsed().as_millis(),
+            total_changes = res.total_changes,
+            texels = res.texels.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_pipeline_details",
+        description = "Get detailed metadata about a GPU pipeline: type (Graphics/Compute), shader stages with entry points, resource bindings, constant blocks, samplers, vertex inputs (for graphics), render targets, depth/stencil/blend state, and all event IDs where this pipeline is active. Note: render targets and depth/stencil/blend state are captured from the first event where the pipeline is active."
+    )]
+    async fn get_pipeline_details(
+        &self,
+        Parameters(req): Parameters<GetPipelineDetailsRequest>,
+    ) -> Result<Json<renderdog::GetPipelineDetailsResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_pipeline_details",
+            capture_path = %req.capture_path,
+            pipeline_name = %req.pipeline_name,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_pipeline_details", "failed");
+            tracing::debug!(tool = "renderdoc_get_pipeline_details", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_pipeline_details(
+                &cwd,
+                &renderdog::GetPipelineDetailsRequest {
+                    capture_path: req.capture_path,
+                    pipeline_name: req.pipeline_name,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_pipeline_details", "failed");
+                tracing::debug!(tool = "renderdoc_get_pipeline_details", err = %e, "details");
+                format!("get pipeline details failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_pipeline_details",
+            elapsed_ms = start.elapsed().as_millis(),
+            pipeline_type = %res.pipeline_type,
+            stages = res.stages.len(),
+            event_ids = res.event_ids.len(),
+            "ok"
+        );
+        Ok(Json(res))
+    }
+
+    #[tool(
+        name = "renderdoc_get_pipeline_binding_changes_delta",
+        description = "Track GPU pipeline binding changes across a frame. For a given pipeline, monitors which resources are bound at each binding point (textures, buffers, samplers, render targets) across all events where the pipeline is active. Returns delta-encoded changes showing when bindings change."
+    )]
+    async fn get_pipeline_binding_changes_delta(
+        &self,
+        Parameters(req): Parameters<GetPipelineBindingChangesDeltaRequest>,
+    ) -> Result<Json<renderdog::GetPipelineBindingChangesDeltaResponse>, String> {
+        let start = Instant::now();
+        tracing::info!(
+            tool = "renderdoc_get_pipeline_binding_changes_delta",
+            capture_path = %req.capture_path,
+            pipeline_name = %req.pipeline_name,
+            "start"
+        );
+
+        let install = renderdog::RenderDocInstallation::detect().map_err(|e| {
+            tracing::error!(tool = "renderdoc_get_pipeline_binding_changes_delta", "failed");
+            tracing::debug!(tool = "renderdoc_get_pipeline_binding_changes_delta", err = %e, "details");
+            format!("detect installation failed: {e}")
+        })?;
+
+        let cwd = resolve_base_cwd(req.cwd.clone())?;
+
+        let res = install
+            .get_pipeline_binding_changes_delta(
+                &cwd,
+                &renderdog::GetPipelineBindingChangesDeltaRequest {
+                    capture_path: req.capture_path,
+                    pipeline_name: req.pipeline_name,
+                },
+            )
+            .map_err(|e| {
+                tracing::error!(tool = "renderdoc_get_pipeline_binding_changes_delta", "failed");
+                tracing::debug!(tool = "renderdoc_get_pipeline_binding_changes_delta", err = %e, "details");
+                format!("get pipeline binding changes delta failed: {e}")
+            })?;
+
+        tracing::info!(
+            tool = "renderdoc_get_pipeline_binding_changes_delta",
+            elapsed_ms = start.elapsed().as_millis(),
+            pipeline_type = %res.pipeline_type,
+            total_changes = res.total_changes,
+            bindings = res.bindings.len(),
             "ok"
         );
         Ok(Json(res))
@@ -1466,7 +1774,7 @@ impl RenderdogMcpServer {
 
     #[tool(
         name = "renderdoc_search_resources",
-        description = "Search for resources by regex pattern in a .rdc capture. Returns matching resource IDs, names, and types.\n\nRegex examples:\n- \"particle\" - contains 'particle'\n- \"^Texture\" - starts with 'Texture'\n- \"shadow|light\" - contains 'shadow' or 'light'\n- \"gbuffer_\\\\d+\" - matches 'gbuffer_0', 'gbuffer_1', etc.\n\nValid resource_types filter values: Unknown, Device, Queue, CommandBuffer, Texture, Buffer, View, Sampler, SwapchainImage, Memory, Shader, ShaderBinding, PipelineState, StateObject, RenderPass, Query, Sync, Pool, AccelerationStructure, DescriptorStore"
+        description = "Search for resources in a .rdc capture. Returns matching resource IDs, names, and types.\n\nFilter options:\n- query: Optional regex pattern to match names. If not provided, returns all resources.\n- resource_types: Optional list to filter by type (e.g., [\"PipelineState\"] returns all pipelines)\n\nRegex examples:\n- \"particle\" - contains 'particle'\n- \"^Texture\" - starts with 'Texture'\n- \"shadow|light\" - contains 'shadow' or 'light'\n\nValid resource_types: Unknown, Device, Queue, CommandBuffer, Texture, Buffer, View, Sampler, SwapchainImage, Memory, Shader, ShaderBinding, PipelineState, StateObject, RenderPass, Query, Sync, Pool, AccelerationStructure, DescriptorStore"
     )]
     async fn search_resources(
         &self,
@@ -1476,8 +1784,7 @@ impl RenderdogMcpServer {
         tracing::info!(
             tool = "renderdoc_search_resources",
             capture_path = %req.capture_path,
-            query = %req.query,
-            regex = req.regex,
+            query = ?req.query,
             case_sensitive = req.case_sensitive,
             "start"
         );
@@ -1496,7 +1803,6 @@ impl RenderdogMcpServer {
                 &renderdog::SearchResourcesRequest {
                     capture_path: req.capture_path,
                     query: req.query,
-                    regex: req.regex,
                     case_sensitive: req.case_sensitive,
                     max_results: req.max_results,
                     resource_types: req.resource_types,

@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo doc:*)",
+      "Bash(cargo expand:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo tree:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(dir /b \"C:\\\\Users\\\\mattm\\\\AppData\\\\Local\\\\Temp\\\\RenderDoc\\\\*.rdc\")",
+      "Bash(\"/c/Program Files/RenderDoc/qrenderdoc\" --python debug_resource_bindings.py)",
+      "Bash(python:*)",
+      "Bash(where:*)",
+      "Bash(qrenderdoc:*)",
+      "Bash(cargo run:*)"
+    ]
+  }
+}

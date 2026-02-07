@@ -1,5 +1,5 @@
 """
-get_shader_info_json.py -- RenderDoc Python script that returns JSON info about shaders.
+get_shader_details_json.py -- RenderDoc Python script that returns JSON info about shaders.
 
 Given a pipeline name and optional entry point filter, finds all matching shader stages
 in the capture and returns a JSON array of shader info objects, each containing:
@@ -25,8 +25,8 @@ import traceback
 import renderdoc as rd
 
 
-REQ_PATH = "get_shader_info_json.request.json"
-RESP_PATH = "get_shader_info_json.response.json"
+REQ_PATH = "get_shader_details_json.request.json"
+RESP_PATH = "get_shader_details_json.response.json"
 
 
 def write_envelope(ok: bool, result=None, error: str = None) -> None:

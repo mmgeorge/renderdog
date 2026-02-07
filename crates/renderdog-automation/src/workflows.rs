@@ -113,7 +113,7 @@ pub struct GetEventsResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetShaderInfoRequest {
+pub struct GetShaderDetailsRequest {
     pub capture_path: String,
     pub pipeline_name: String,
     /// Optional list of entry points to filter by. If not provided, returns all entry points.
@@ -191,7 +191,7 @@ pub struct ShaderInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetShaderInfoResponse {
+pub struct GetShaderDetailsResponse {
     pub capture_path: String,
     pub pipeline_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -199,16 +199,14 @@ pub struct GetShaderInfoResponse {
     pub shaders: Vec<ShaderInfo>,
 }
 
+// ---------------------------------------------------------------------------
+// Get Buffer Details types
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct GetBufferChangesDeltaRequest {
+pub struct GetBufferDetailsRequest {
     pub capture_path: String,
     pub buffer_name: String,
-    #[serde(default = "default_tracked_indices")]
-    pub tracked_indices: Vec<u32>,
-}
-
-fn default_tracked_indices() -> Vec<u32> {
-    vec![0]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -225,6 +223,73 @@ pub struct BufferUsage {
     pub descriptor_set: String,
     pub binding: BufferBinding,
     pub event_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetBufferDetailsResponse {
+    pub buffer_name: String,
+    #[schemars(schema_with = "any_json_schema::schema")]
+    pub schema: serde_json::Value,
+    pub stride: u64,
+    pub usages: Vec<BufferUsage>,
+}
+
+// ---------------------------------------------------------------------------
+// Get Texture Details types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetTextureDetailsRequest {
+    pub capture_path: String,
+    pub texture_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TextureBinding {
+    pub index: u32,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub binding_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TextureUsage {
+    pub pipeline: String,
+    pub usage_type: String,
+    pub binding: TextureBinding,
+    pub event_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetTextureDetailsResponse {
+    pub texture_name: String,
+    pub texture_id: u64,
+    pub format: String,
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+    pub mip_levels: u32,
+    pub array_size: u32,
+    pub sample_count: u32,
+    #[serde(default)]
+    pub cube_map: bool,
+    pub usages: Vec<TextureUsage>,
+}
+
+// ---------------------------------------------------------------------------
+// Get Buffer Changes Delta types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetBufferChangesDeltaRequest {
+    pub capture_path: String,
+    pub buffer_name: String,
+    #[serde(default = "default_tracked_indices")]
+    pub tracked_indices: Vec<u32>,
+}
+
+fn default_tracked_indices() -> Vec<u32> {
+    vec![0]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -245,15 +310,598 @@ pub struct BufferElement {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GetBufferChangesDeltaResponse {
-    pub capture_path: String,
-    pub buffer_name: String,
-    #[schemars(schema_with = "any_json_schema::schema")]
-    pub schema: serde_json::Value,
-    pub stride: u64,
-    pub usages: Vec<BufferUsage>,
     pub tracked_indices: Vec<u32>,
     pub total_changes: u64,
     pub elements: Vec<BufferElement>,
+}
+
+// ---------------------------------------------------------------------------
+// Get Texture Changes Delta types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TexelCoord {
+    pub x: u32,
+    pub y: u32,
+    #[serde(default)]
+    pub z: u32,
+    #[serde(default)]
+    pub mip: u32,
+    #[serde(default)]
+    pub slice: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetTextureChangesDeltaRequest {
+    pub capture_path: String,
+    pub texture_name: String,
+    #[serde(default = "default_tracked_texels")]
+    pub tracked_texels: Vec<TexelCoord>,
+}
+
+fn default_tracked_texels() -> Vec<TexelCoord> {
+    vec![TexelCoord { x: 0, y: 0, z: 0, mip: 0, slice: 0 }]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TextureFormatInfo {
+    pub name: String,
+    pub channels: u32,
+    pub bytes_per_channel: u32,
+    pub component_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TexelChange {
+    pub event_id: u32,
+    #[schemars(schema_with = "any_json_schema::schema")]
+    pub delta: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TrackedTexel {
+    pub coord: TexelCoord,
+    pub initial_event_id: u32,
+    #[schemars(schema_with = "any_json_schema::schema")]
+    pub initial_state: serde_json::Value,
+    pub changes: Vec<TexelChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetTextureChangesDeltaResponse {
+    pub tracked_texels: Vec<TexelCoord>,
+    pub format: TextureFormatInfo,
+    pub total_changes: u64,
+    pub texels: Vec<TrackedTexel>,
+}
+
+// ---------------------------------------------------------------------------
+// Get Pipeline Details types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetPipelineDetailsRequest {
+    pub capture_path: String,
+    pub pipeline_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineStageInfo {
+    pub stage: String,
+    pub shader: String,
+    pub entry_point: String,
+    /// Vertex buffer layouts (Vertex stage only)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vertex_buffers: Vec<VertexBufferLayout>,
+    /// Index buffer info (Vertex stage only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index_buffer: Option<IndexBufferInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct IndexBufferInfo {
+    /// Index format (Uint16 or Uint32)
+    pub format: String,
+    /// Stride in bytes (2 for Uint16, 4 for Uint32)
+    pub stride: u32,
+    /// Example resource name from one of the events
+    pub example_resource: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineResourceBinding {
+    pub stage: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub binding_type: String,
+    pub read_write: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<u32>,
+    /// Example resource name from one of the events where this binding is used
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub example_resource: Option<String>,
+    /// For buffers: the inferred struct schema from shader reflection
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "any_json_schema::schema")]
+    pub schema: Option<serde_json::Value>,
+    /// For textures: the format of the bound texture
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineConstantBlock {
+    pub stage: String,
+    pub name: String,
+    pub byte_size: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineSamplerBinding {
+    pub stage: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VertexAttribute {
+    pub name: String,
+    pub offset: u32,
+    pub format: String,
+    pub per_instance: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VertexBufferLayout {
+    /// Vertex buffer binding index
+    pub binding: u32,
+    /// Stride in bytes between vertices
+    pub stride: u32,
+    /// Attributes in this vertex buffer
+    pub attributes: Vec<VertexAttribute>,
+    /// Example resource name from one of the events
+    pub example_resource: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineRenderTarget {
+    pub index: u32,
+    #[serde(rename = "type")]
+    pub target_type: String,
+    /// Format of the render target (e.g., "R8G8B8A8_UNORM", "D32_SFLOAT")
+    pub format: String,
+    /// MSAA sample count (1 for non-MSAA)
+    pub sample_count: u32,
+    /// Example resource name from one of the events where this pipeline is used
+    pub example_resource: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineDepthState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_test_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_write_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_function: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_bounds_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_depth_bounds: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_depth_bounds: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct StencilFaceState {
+    /// Comparison function that determines if the fail_op or pass_op is used
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compare: Option<String>,
+    /// Operation performed when stencil test fails
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_op: Option<String>,
+    /// Operation performed when depth test fails but stencil test succeeds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_fail_op: Option<String>,
+    /// Operation performed when stencil test succeeds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pass_op: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineStencilState {
+    /// Front face stencil mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub front: Option<StencilFaceState>,
+    /// Back face stencil mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub back: Option<StencilFaceState>,
+    /// Stencil values are AND'd with this mask when reading (low 8 bits)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_mask: Option<u32>,
+    /// Stencil values are AND'd with this mask when writing (low 8 bits)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_mask: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BlendOperation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BlendAttachment {
+    pub index: u32,
+    pub enabled: bool,
+    pub write_mask: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_blend: Option<BlendOperation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_blend: Option<BlendOperation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineBlendState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<BlendAttachment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blend_factor: Option<Vec<f32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logic_op_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logic_op: Option<String>,
+}
+
+/// A binding in a descriptor set layout
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LayoutBinding {
+    /// Binding number within the set
+    pub binding: u32,
+    /// Descriptor type as string (e.g., "UniformBuffer", "StorageBuffer", "CombinedImageSampler")
+    pub descriptor_type: String,
+    /// Number of descriptors in this binding (for arrays)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descriptor_count: Option<u32>,
+    /// List of shader stages that can access this binding
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stages: Vec<String>,
+    /// Whether this binding has immutable samplers
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_immutable_samplers: Option<bool>,
+}
+
+/// A descriptor set within a pipeline layout
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DescriptorSetLayout {
+    /// Set index in the pipeline layout
+    #[serde(rename = "set")]
+    pub set_index: u32,
+    /// Name of this descriptor set (e.g., "group0", "group1")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Whether this is a push descriptor set
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_descriptor: Option<bool>,
+    /// Index of the descriptor buffer (for VK_EXT_descriptor_buffer)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub descriptor_buffer_index: Option<i32>,
+    /// Bindings within this descriptor set layout
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<LayoutBinding>,
+}
+
+/// A descriptor buffer binding (for VK_EXT_descriptor_buffer)
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct DescriptorBufferBinding {
+    /// Index of this descriptor buffer
+    pub index: u32,
+    /// Name of the buffer resource
+    pub buffer: String,
+    /// Byte offset into the buffer
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    /// Buffer types (e.g., ["resource"], ["sampler"], ["resource", "sampler"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub types: Vec<String>,
+}
+
+/// Pipeline layout information
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PipelineLayout {
+    /// Name of the pipeline layout
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Pipeline creation flags as semantic names (e.g., ["CaptureStatistics", "DescriptorBuffer"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<String>,
+    /// Whether this pipeline uses VK_EXT_descriptor_buffer
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uses_descriptor_buffers: Option<bool>,
+    /// Descriptor sets in the pipeline layout
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub descriptor_sets: Vec<DescriptorSetLayout>,
+    /// Descriptor buffers bound (for VK_EXT_descriptor_buffer)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub descriptor_buffers: Vec<DescriptorBufferBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetPipelineDetailsResponse {
+    pub pipeline_name: String,
+    pub pipeline_id: u64,
+    pub pipeline_type: String,
+    pub stages: Vec<PipelineStageInfo>,
+    pub resource_bindings: Vec<PipelineResourceBinding>,
+    pub constant_blocks: Vec<PipelineConstantBlock>,
+    /// Samplers used by the pipeline (may be empty or absent for compute)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub samplers: Vec<PipelineSamplerBinding>,
+    /// Render target layouts (graphics pipelines only)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub render_targets: Vec<PipelineRenderTarget>,
+    /// Depth testing state (graphics pipelines only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_state: Option<PipelineDepthState>,
+    /// Stencil testing state (graphics pipelines only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stencil_state: Option<PipelineStencilState>,
+    /// Blend state (graphics pipelines only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blend_state: Option<PipelineBlendState>,
+    /// Pipeline layout information (descriptor sets, flags, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_layout: Option<PipelineLayout>,
+    /// Vulkan pipeline create info extracted from structured file (graphics pipelines only)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vulkan_create_info: Option<VulkanPipelineCreateInfo>,
+    pub event_ids: Vec<u32>,
+    /// Debug info for resource scanning (temporary)
+    #[serde(default, rename = "_debug_resource_scan", skip_serializing_if = "Vec::is_empty")]
+    #[schemars(schema_with = "any_json_schema::schema")]
+    pub debug_resource_scan: Vec<serde_json::Value>,
+}
+
+/// Vulkan graphics pipeline create info extracted from the structured file.
+/// Contains the full pipeline state as specified in VkGraphicsPipelineCreateInfo.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanPipelineCreateInfo {
+    /// Pipeline creation flags
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flags: Option<String>,
+    /// Shader stages used by this pipeline
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shader_stages: Vec<VulkanShaderStageInfo>,
+    /// Vertex input state (bindings and attributes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vertex_input: Option<VulkanVertexInputState>,
+    /// Input assembly state (topology, primitive restart)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_assembly: Option<VulkanInputAssemblyState>,
+    /// Tessellation state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tessellation: Option<VulkanTessellationState>,
+    /// Viewport state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<VulkanViewportState>,
+    /// Rasterization state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rasterization: Option<VulkanRasterizationState>,
+    /// Multisample state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multisample: Option<VulkanMultisampleState>,
+    /// Depth/stencil state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_stencil: Option<VulkanDepthStencilState>,
+    /// Color blend state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_blend: Option<VulkanColorBlendState>,
+    /// Dynamic states
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_states: Vec<String>,
+    /// Pipeline layout name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<String>,
+    /// Render pass name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub render_pass: Option<String>,
+    /// Subpass index
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subpass: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanShaderStageInfo {
+    pub stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry_point: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanVertexInputState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bindings: Vec<VulkanVertexBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes: Vec<VulkanVertexAttribute>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanVertexBinding {
+    pub binding: u32,
+    pub stride: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_rate: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanVertexAttribute {
+    pub location: u32,
+    pub binding: u32,
+    pub format: String,
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanInputAssemblyState {
+    pub topology: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primitive_restart_enable: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanTessellationState {
+    pub patch_control_points: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanViewportState {
+    pub viewport_count: u32,
+    pub scissor_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanRasterizationState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_clamp_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rasterizer_discard_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub polygon_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cull_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub front_face: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_bias_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_width: Option<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanMultisampleState {
+    pub samples: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sample_shading_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_to_coverage_enable: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanStencilOpState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fail_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pass_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_fail_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compare_op: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanDepthStencilState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_test_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_write_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_compare_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_bounds_test_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stencil_test_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub front_stencil: Option<VulkanStencilOpState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub back_stencil: Option<VulkanStencilOpState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanColorBlendAttachment {
+    pub blend_enable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src_color_blend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dst_color_blend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_blend_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub src_alpha_blend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dst_alpha_blend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_blend_op: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_write_mask: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct VulkanColorBlendState {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logic_op_enable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logic_op: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<VulkanColorBlendAttachment>,
+}
+
+// ---------------------------------------------------------------------------
+// Get Pipeline Binding Changes Delta types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetPipelineBindingChangesDeltaRequest {
+    pub capture_path: String,
+    pub pipeline_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BindingValue {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_id: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct BindingChange {
+    pub event_id: u32,
+    pub new_value: BindingValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TrackedBinding {
+    pub stage: String,
+    pub binding_type: String,
+    pub set: u32,
+    pub binding: u32,
+    pub name: String,
+    pub initial_event_id: u32,
+    pub initial_value: BindingValue,
+    pub changes: Vec<BindingChange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct GetPipelineBindingChangesDeltaResponse {
+    pub pipeline_name: String,
+    pub pipeline_type: String,
+    pub total_changes: u64,
+    pub bindings: Vec<TrackedBinding>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -368,7 +1016,8 @@ pub struct GetResourceChangedEventIdsResponse {
 pub struct SearchResourcesRequest {
     /// Path to the .rdc capture file.
     pub capture_path: String,
-    /// Regex pattern to match against resource names.
+    /// Optional regex pattern to match against resource names.
+    /// If not provided, matches all resources (filtered only by resource_types if specified).
     ///
     /// Uses Rust-compatible regex syntax. Examples:
     /// - `"particle"` - matches names containing "particle"
@@ -377,10 +1026,8 @@ pub struct SearchResourcesRequest {
     /// - `"shadow|light"` - matches names containing "shadow" or "light"
     /// - `"gbuffer_\\d+"` - matches "gbuffer_0", "gbuffer_1", etc.
     /// - `".*_diffuse$"` - matches names ending with "_diffuse"
-    pub query: String,
-    /// If true, treat `query` as a regex pattern (default). If false, treat as literal string.
-    #[serde(default = "default_regex_mode")]
-    pub regex: bool,
+    #[serde(default)]
+    pub query: Option<String>,
     /// If true, matching is case-sensitive. Default is false (case-insensitive).
     #[serde(default)]
     pub case_sensitive: bool,
@@ -414,10 +1061,6 @@ pub struct SearchResourcesRequest {
     pub resource_types: Option<Vec<String>>,
 }
 
-fn default_regex_mode() -> bool {
-    true
-}
-
 fn default_max_search_results() -> Option<u32> {
     Some(500)
 }
@@ -432,8 +1075,8 @@ pub struct ResourceMatch {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchResourcesResponse {
     pub capture_path: String,
-    pub query: String,
-    pub regex: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
     pub case_sensitive: bool,
     pub total_resources: u64,
     pub total_matches: u64,
@@ -703,7 +1346,7 @@ impl From<crate::QRenderDocPythonError> for GetEventsError {
 }
 
 #[derive(Debug, Error)]
-pub enum GetShaderInfoError {
+pub enum GetShaderDetailsError {
     #[error("failed to create scripts dir: {0}")]
     CreateScriptsDir(std::io::Error),
     #[error("failed to write python script: {0}")]
@@ -720,7 +1363,55 @@ pub enum GetShaderInfoError {
     ScriptError(String),
 }
 
-impl From<crate::QRenderDocPythonError> for GetShaderInfoError {
+impl From<crate::QRenderDocPythonError> for GetShaderDetailsError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum GetBufferDetailsError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for GetBufferDetailsError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum GetTextureDetailsError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for GetTextureDetailsError {
     fn from(value: crate::QRenderDocPythonError) -> Self {
         Self::QRenderDocPython(Box::new(value))
     }
@@ -745,6 +1436,78 @@ pub enum GetBufferChangesDeltaError {
 }
 
 impl From<crate::QRenderDocPythonError> for GetBufferChangesDeltaError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum GetTextureChangesDeltaError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for GetTextureChangesDeltaError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum GetPipelineDetailsError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for GetPipelineDetailsError {
+    fn from(value: crate::QRenderDocPythonError) -> Self {
+        Self::QRenderDocPython(Box::new(value))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum GetPipelineBindingChangesDeltaError {
+    #[error("failed to create scripts dir: {0}")]
+    CreateScriptsDir(std::io::Error),
+    #[error("failed to write python script: {0}")]
+    WriteScript(std::io::Error),
+    #[error("failed to write request JSON: {0}")]
+    WriteRequest(std::io::Error),
+    #[error("qrenderdoc python failed: {0}")]
+    QRenderDocPython(Box<crate::QRenderDocPythonError>),
+    #[error("failed to read response JSON: {0}")]
+    ReadResponse(std::io::Error),
+    #[error("failed to parse JSON: {0}")]
+    ParseJson(serde_json::Error),
+    #[error("qrenderdoc script error: {0}")]
+    ScriptError(String),
+}
+
+impl From<crate::QRenderDocPythonError> for GetPipelineBindingChangesDeltaError {
     fn from(value: crate::QRenderDocPythonError) -> Self {
         Self::QRenderDocPython(Box::new(value))
     }
@@ -1035,25 +1798,25 @@ impl RenderDocInstallation {
         }
     }
 
-    pub fn get_shader_info(
+    pub fn get_shader_details(
         &self,
         cwd: &Path,
-        req: &GetShaderInfoRequest,
-    ) -> Result<GetShaderInfoResponse, GetShaderInfoError> {
+        req: &GetShaderDetailsRequest,
+    ) -> Result<GetShaderDetailsResponse, GetShaderDetailsError> {
         let scripts_dir = default_scripts_dir(cwd);
-        std::fs::create_dir_all(&scripts_dir).map_err(GetShaderInfoError::CreateScriptsDir)?;
+        std::fs::create_dir_all(&scripts_dir).map_err(GetShaderDetailsError::CreateScriptsDir)?;
 
-        let script_path = scripts_dir.join("get_shader_info_json.py");
-        write_script_file(&script_path, GET_SHADER_INFO_JSON_PY)
-            .map_err(GetShaderInfoError::WriteScript)?;
+        let script_path = scripts_dir.join("get_shader_details_json.py");
+        write_script_file(&script_path, GET_SHADER_DETAILS_JSON_PY)
+            .map_err(GetShaderDetailsError::WriteScript)?;
 
-        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_shader_info")
-            .map_err(GetShaderInfoError::CreateScriptsDir)?;
-        let request_path = run_dir.join("get_shader_info_json.request.json");
-        let response_path = run_dir.join("get_shader_info_json.response.json");
-        remove_if_exists(&response_path).map_err(GetShaderInfoError::WriteRequest)?;
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_shader_details")
+            .map_err(GetShaderDetailsError::CreateScriptsDir)?;
+        let request_path = run_dir.join("get_shader_details_json.request.json");
+        let response_path = run_dir.join("get_shader_details_json.response.json");
+        remove_if_exists(&response_path).map_err(GetShaderDetailsError::WriteRequest)?;
 
-        let req = GetShaderInfoRequest {
+        let req = GetShaderDetailsRequest {
             capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
             pipeline_name: req.pipeline_name.clone(),
             entry_points: req.entry_points.clone(),
@@ -1061,9 +1824,9 @@ impl RenderDocInstallation {
 
         std::fs::write(
             &request_path,
-            serde_json::to_vec(&req).map_err(GetShaderInfoError::ParseJson)?,
+            serde_json::to_vec(&req).map_err(GetShaderDetailsError::ParseJson)?,
         )
-        .map_err(GetShaderInfoError::WriteRequest)?;
+        .map_err(GetShaderDetailsError::WriteRequest)?;
 
         let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
             script_path: script_path.clone(),
@@ -1072,14 +1835,116 @@ impl RenderDocInstallation {
         })?;
         let _ = result;
 
-        let bytes = std::fs::read(&response_path).map_err(GetShaderInfoError::ReadResponse)?;
-        let env: QRenderDocJsonEnvelope<GetShaderInfoResponse> =
-            serde_json::from_slice(&bytes).map_err(GetShaderInfoError::ParseJson)?;
+        let bytes = std::fs::read(&response_path).map_err(GetShaderDetailsError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<GetShaderDetailsResponse> =
+            serde_json::from_slice(&bytes).map_err(GetShaderDetailsError::ParseJson)?;
         if env.ok {
             env.result
-                .ok_or_else(|| GetShaderInfoError::ScriptError("missing result".into()))
+                .ok_or_else(|| GetShaderDetailsError::ScriptError("missing result".into()))
         } else {
-            Err(GetShaderInfoError::ScriptError(
+            Err(GetShaderDetailsError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
+    pub fn get_buffer_details(
+        &self,
+        cwd: &Path,
+        req: &GetBufferDetailsRequest,
+    ) -> Result<GetBufferDetailsResponse, GetBufferDetailsError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir)
+            .map_err(GetBufferDetailsError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("get_buffer_details_json.py");
+        write_script_file(&script_path, GET_BUFFER_DETAILS_JSON_PY)
+            .map_err(GetBufferDetailsError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_buffer_details")
+            .map_err(GetBufferDetailsError::CreateScriptsDir)?;
+        let request_path = run_dir.join("get_buffer_details_json.request.json");
+        let response_path = run_dir.join("get_buffer_details_json.response.json");
+        remove_if_exists(&response_path).map_err(GetBufferDetailsError::WriteRequest)?;
+
+        let req = GetBufferDetailsRequest {
+            capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
+            buffer_name: req.buffer_name.clone(),
+        };
+
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(&req).map_err(GetBufferDetailsError::ParseJson)?,
+        )
+        .map_err(GetBufferDetailsError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+        let _ = result;
+
+        let bytes =
+            std::fs::read(&response_path).map_err(GetBufferDetailsError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<GetBufferDetailsResponse> =
+            serde_json::from_slice(&bytes).map_err(GetBufferDetailsError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| GetBufferDetailsError::ScriptError("missing result".into()))
+        } else {
+            Err(GetBufferDetailsError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
+    pub fn get_texture_details(
+        &self,
+        cwd: &Path,
+        req: &GetTextureDetailsRequest,
+    ) -> Result<GetTextureDetailsResponse, GetTextureDetailsError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir)
+            .map_err(GetTextureDetailsError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("get_texture_details_json.py");
+        write_script_file(&script_path, GET_TEXTURE_DETAILS_JSON_PY)
+            .map_err(GetTextureDetailsError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_texture_details")
+            .map_err(GetTextureDetailsError::CreateScriptsDir)?;
+        let request_path = run_dir.join("get_texture_details_json.request.json");
+        let response_path = run_dir.join("get_texture_details_json.response.json");
+        remove_if_exists(&response_path).map_err(GetTextureDetailsError::WriteRequest)?;
+
+        let req = GetTextureDetailsRequest {
+            capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
+            texture_name: req.texture_name.clone(),
+        };
+
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(&req).map_err(GetTextureDetailsError::ParseJson)?,
+        )
+        .map_err(GetTextureDetailsError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+        let _ = result;
+
+        let bytes =
+            std::fs::read(&response_path).map_err(GetTextureDetailsError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<GetTextureDetailsResponse> =
+            serde_json::from_slice(&bytes).map_err(GetTextureDetailsError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| GetTextureDetailsError::ScriptError("missing result".into()))
+        } else {
+            Err(GetTextureDetailsError::ScriptError(
                 env.error.unwrap_or_else(|| "unknown error".into()),
             ))
         }
@@ -1132,6 +1997,160 @@ impl RenderDocInstallation {
                 .ok_or_else(|| GetBufferChangesDeltaError::ScriptError("missing result".into()))
         } else {
             Err(GetBufferChangesDeltaError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
+    pub fn get_texture_changes_delta(
+        &self,
+        cwd: &Path,
+        req: &GetTextureChangesDeltaRequest,
+    ) -> Result<GetTextureChangesDeltaResponse, GetTextureChangesDeltaError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir)
+            .map_err(GetTextureChangesDeltaError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("get_texture_changes_delta_json.py");
+        write_script_file(&script_path, GET_TEXTURE_CHANGES_DELTA_JSON_PY)
+            .map_err(GetTextureChangesDeltaError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_texture_changes_delta")
+            .map_err(GetTextureChangesDeltaError::CreateScriptsDir)?;
+        let request_path = run_dir.join("get_texture_changes_delta_json.request.json");
+        let response_path = run_dir.join("get_texture_changes_delta_json.response.json");
+        remove_if_exists(&response_path).map_err(GetTextureChangesDeltaError::WriteRequest)?;
+
+        let req = GetTextureChangesDeltaRequest {
+            capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
+            texture_name: req.texture_name.clone(),
+            tracked_texels: req.tracked_texels.clone(),
+        };
+
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(&req).map_err(GetTextureChangesDeltaError::ParseJson)?,
+        )
+        .map_err(GetTextureChangesDeltaError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+        let _ = result;
+
+        let bytes =
+            std::fs::read(&response_path).map_err(GetTextureChangesDeltaError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<GetTextureChangesDeltaResponse> =
+            serde_json::from_slice(&bytes).map_err(GetTextureChangesDeltaError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| GetTextureChangesDeltaError::ScriptError("missing result".into()))
+        } else {
+            Err(GetTextureChangesDeltaError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
+    pub fn get_pipeline_details(
+        &self,
+        cwd: &Path,
+        req: &GetPipelineDetailsRequest,
+    ) -> Result<GetPipelineDetailsResponse, GetPipelineDetailsError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir)
+            .map_err(GetPipelineDetailsError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("get_pipeline_details_json.py");
+        write_script_file(&script_path, GET_PIPELINE_DETAILS_JSON_PY)
+            .map_err(GetPipelineDetailsError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_pipeline_details")
+            .map_err(GetPipelineDetailsError::CreateScriptsDir)?;
+        let request_path = run_dir.join("get_pipeline_details_json.request.json");
+        let response_path = run_dir.join("get_pipeline_details_json.response.json");
+        remove_if_exists(&response_path).map_err(GetPipelineDetailsError::WriteRequest)?;
+
+        let req = GetPipelineDetailsRequest {
+            capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
+            pipeline_name: req.pipeline_name.clone(),
+        };
+
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(&req).map_err(GetPipelineDetailsError::ParseJson)?,
+        )
+        .map_err(GetPipelineDetailsError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+        let _ = result;
+
+        let bytes =
+            std::fs::read(&response_path).map_err(GetPipelineDetailsError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<GetPipelineDetailsResponse> =
+            serde_json::from_slice(&bytes).map_err(GetPipelineDetailsError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| GetPipelineDetailsError::ScriptError("missing result".into()))
+        } else {
+            Err(GetPipelineDetailsError::ScriptError(
+                env.error.unwrap_or_else(|| "unknown error".into()),
+            ))
+        }
+    }
+
+    pub fn get_pipeline_binding_changes_delta(
+        &self,
+        cwd: &Path,
+        req: &GetPipelineBindingChangesDeltaRequest,
+    ) -> Result<GetPipelineBindingChangesDeltaResponse, GetPipelineBindingChangesDeltaError> {
+        let scripts_dir = default_scripts_dir(cwd);
+        std::fs::create_dir_all(&scripts_dir)
+            .map_err(GetPipelineBindingChangesDeltaError::CreateScriptsDir)?;
+
+        let script_path = scripts_dir.join("get_pipeline_binding_changes_delta_json.py");
+        write_script_file(&script_path, GET_PIPELINE_BINDING_CHANGES_DELTA_JSON_PY)
+            .map_err(GetPipelineBindingChangesDeltaError::WriteScript)?;
+
+        let run_dir = create_qrenderdoc_run_dir(&scripts_dir, "get_pipeline_binding_changes_delta")
+            .map_err(GetPipelineBindingChangesDeltaError::CreateScriptsDir)?;
+        let request_path = run_dir.join("get_pipeline_binding_changes_delta_json.request.json");
+        let response_path = run_dir.join("get_pipeline_binding_changes_delta_json.response.json");
+        remove_if_exists(&response_path).map_err(GetPipelineBindingChangesDeltaError::WriteRequest)?;
+
+        let req = GetPipelineBindingChangesDeltaRequest {
+            capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
+            pipeline_name: req.pipeline_name.clone(),
+        };
+
+        std::fs::write(
+            &request_path,
+            serde_json::to_vec(&req).map_err(GetPipelineBindingChangesDeltaError::ParseJson)?,
+        )
+        .map_err(GetPipelineBindingChangesDeltaError::WriteRequest)?;
+
+        let result = self.run_qrenderdoc_python(&QRenderDocPythonRequest {
+            script_path: script_path.clone(),
+            args: Vec::new(),
+            working_dir: Some(run_dir.clone()),
+        })?;
+        let _ = result;
+
+        let bytes =
+            std::fs::read(&response_path).map_err(GetPipelineBindingChangesDeltaError::ReadResponse)?;
+        let env: QRenderDocJsonEnvelope<GetPipelineBindingChangesDeltaResponse> =
+            serde_json::from_slice(&bytes).map_err(GetPipelineBindingChangesDeltaError::ParseJson)?;
+        if env.ok {
+            env.result
+                .ok_or_else(|| GetPipelineBindingChangesDeltaError::ScriptError("missing result".into()))
+        } else {
+            Err(GetPipelineBindingChangesDeltaError::ScriptError(
                 env.error.unwrap_or_else(|| "unknown error".into()),
             ))
         }
@@ -1261,7 +2280,6 @@ impl RenderDocInstallation {
         let req = SearchResourcesRequest {
             capture_path: resolve_path_string_from_cwd(cwd, &req.capture_path),
             query: req.query.clone(),
-            regex: req.regex,
             case_sensitive: req.case_sensitive,
             max_results: req.max_results,
             resource_types: req.resource_types.clone(),
@@ -1462,10 +2480,23 @@ const EXPORT_BINDINGS_INDEX_JSONL_PY: &str =
 
 const GET_EVENTS_JSON_PY: &str = include_str!("../scripts/get_events_json.py");
 
-const GET_SHADER_INFO_JSON_PY: &str = include_str!("../scripts/get_shader_info_json.py");
+const GET_SHADER_DETAILS_JSON_PY: &str = include_str!("../scripts/get_shader_details_json.py");
+
+const GET_BUFFER_DETAILS_JSON_PY: &str = include_str!("../scripts/get_buffer_details_json.py");
+
+const GET_TEXTURE_DETAILS_JSON_PY: &str = include_str!("../scripts/get_texture_details_json.py");
 
 const GET_BUFFER_CHANGES_DELTA_JSON_PY: &str =
     include_str!("../scripts/get_buffer_changes_delta_json.py");
+
+const GET_TEXTURE_CHANGES_DELTA_JSON_PY: &str =
+    include_str!("../scripts/get_texture_changes_delta_json.py");
+
+const GET_PIPELINE_DETAILS_JSON_PY: &str =
+    include_str!("../scripts/get_pipeline_details_json.py");
+
+const GET_PIPELINE_BINDING_CHANGES_DELTA_JSON_PY: &str =
+    include_str!("../scripts/get_pipeline_binding_changes_delta_json.py");
 
 const GET_EVENT_PIPELINE_STATE_JSON_PY: &str =
     include_str!("../scripts/get_event_pipeline_state_json.py");

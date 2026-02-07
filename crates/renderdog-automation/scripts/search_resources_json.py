@@ -69,9 +69,8 @@ def main() -> None:
     with open(REQ_PATH, "r", encoding="utf-8") as f:
         req = json.load(f)
 
-    query = req.get("query", "")
+    query = req.get("query")  # Optional - if None/empty, matches all
     case_sensitive = req.get("case_sensitive", False)
-    regex_mode = req.get("regex", True)  # default to regex mode
     max_results = req.get("max_results", 500)
     resource_types = req.get("resource_types", None)  # optional list like ["Buffer", "Texture"]
 
@@ -93,13 +92,14 @@ def main() -> None:
         try:
             resources = controller.GetResources()
 
-            # Build the search pattern
-            pattern_str = query if regex_mode else re.escape(query)
-            flags = 0 if case_sensitive else re.IGNORECASE
-            try:
-                pattern = re.compile(pattern_str, flags)
-            except re.error as e:
-                raise RuntimeError(f"Invalid regex pattern '{query}': {e}")
+            # Build the search pattern (only if query provided)
+            pattern = None
+            if query:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                try:
+                    pattern = re.compile(query, flags)
+                except re.error as e:
+                    raise RuntimeError(f"Invalid regex pattern '{query}': {e}")
 
             matches = []
             for res in resources:
@@ -111,8 +111,8 @@ def main() -> None:
                     if type_name not in resource_types:
                         continue
 
-                # Match against query
-                if query and not pattern.search(name):
+                # Match against query (if provided)
+                if pattern is not None and not pattern.search(name):
                     continue
 
                 matches.append({
@@ -127,7 +127,6 @@ def main() -> None:
             document = {
                 "capture_path": req["capture_path"],
                 "query": query,
-                "regex": regex_mode,
                 "case_sensitive": case_sensitive,
                 "total_resources": len(resources),
                 "total_matches": len(matches),
